@@ -1,8 +1,7 @@
 //! Block reward calculation and distribution (75% PoW, 25% PoS)
 
-use crate::{PoWConfig, PoWError, Result};
+use crate::{PoWConfig, Result};
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 
 /// Block reward structure (100% to miners)
 #[derive(Debug, Clone, Serialize, Deserialize)]

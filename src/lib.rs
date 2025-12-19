@@ -12,12 +12,18 @@ pub mod miner;
 pub mod mining_pool;
 pub mod rewards;
 pub mod work;
+pub mod stratum;
+pub mod block_validator;
+pub mod consensus;
 
 pub use difficulty::{DifficultyAdjustment, DifficultyCalculator};
 pub use miner::{Miner, MinerConfig, MinerStats};
-pub use mining_pool::{MiningPool, PoolConfig, PoolStats, MinerShare, MinerAccount};
+pub use mining_pool::{MiningPool, PoolConfig, PoolStats, PoolDetailedStats, MinerShare, MinerAccount};
 pub use rewards::{BlockReward, RewardCalculator};
 pub use work::{WorkPackage, WorkProof};
+pub use stratum::{StratumServer, StratumMessage, StratumClient};
+pub use block_validator::{BlockValidator, BlockHeader};
+pub use consensus::{PoWConsensus, ChainState, BlockRecord, ConsensusStats};
 
 use thiserror::Error;
 

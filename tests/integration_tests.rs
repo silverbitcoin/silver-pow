@@ -8,7 +8,7 @@ use silver_pow::{
 #[tokio::test]
 async fn test_complete_mining_workflow() {
     // Create configuration
-    let pow_config = PoWConfig::default();
+    let _pow_config = PoWConfig::default();
     let pool_config = PoolConfig::new().with_fee(1);
 
     // Create mining pool
@@ -93,7 +93,7 @@ async fn test_difficulty_adjustment() {
     let calc = DifficultyCalculator::new(config);
 
     // Test faster blocks (should increase difficulty)
-    let block_times = vec![15_000; 2016]; // 15 seconds each instead of 30
+    let _block_times = vec![15_000; 2016]; // 15 seconds each instead of 30
     let new_diff = calc
         .adjust_difficulty_kadena_style(1_000_000, 2016, 15_000 * 2016)
         .unwrap();
@@ -175,8 +175,7 @@ async fn test_miner_creation_and_stats() {
     assert_eq!(stats.valid_proofs, 0);
 
     // Check uptime
-    let uptime = miner.get_uptime();
-    assert!(uptime >= 0);
+    let _uptime = miner.get_uptime();
 }
 
 #[tokio::test]
@@ -316,7 +315,6 @@ async fn test_pool_statistics() {
     assert_eq!(stats.connected_miners, 3);
     assert_eq!(stats.shares_accepted, 0);
     assert_eq!(stats.blocks_found, 0);
-    assert!(stats.uptime_seconds >= 0);
 }
 
 #[tokio::test]

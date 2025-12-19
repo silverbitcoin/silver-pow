@@ -1,12 +1,12 @@
 //! Production-grade individual miner implementation with real SHA-512 mining
 
-use crate::{PoWConfig, PoWError, Result, WorkPackage, WorkProof};
+use crate::{PoWConfig, Result, WorkPackage, WorkProof};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Configuration for a miner
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +67,7 @@ impl Default for MinerStats {
 
 /// Individual miner with real SHA-512 mining
 pub struct Miner {
+    #[allow(dead_code)]
     config: MinerConfig,
     stats: Arc<RwLock<MinerStats>>,
     current_work: Arc<RwLock<Option<WorkPackage>>>,
@@ -106,13 +107,17 @@ impl Miner {
     /// Mine a single work package using SHA-512
     /// This is the real mining loop - no mocks or placeholders
     pub async fn mine_work(&self, work: WorkPackage) -> Result<Option<WorkProof>> {
+        self.mine_work_with_address(work, vec![0u8; 20]).await
+    }
+
+    /// Mine with a specific miner address
+    pub async fn mine_work_with_address(&self, work: WorkPackage, miner_address: Vec<u8>) -> Result<Option<WorkProof>> {
         let target = work.target.clone();
         let header = work.get_header_for_hashing();
         let work_id = work.work_id.clone();
         let chain_id = work.chain_id;
         let block_height = work.block_height;
         let block_hash = work.block_hash.clone();
-        let miner_address = vec![0u8; 20]; // Placeholder for actual miner address
 
         let start_time = Instant::now();
         let mut nonce = 0u64;
@@ -306,7 +311,6 @@ mod tests {
 
         assert_eq!(stats.total_hashes, 0);
         assert_eq!(stats.valid_proofs, 0);
-        assert!(stats.uptime_seconds >= 0);
     }
 
     #[tokio::test]

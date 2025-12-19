@@ -38,6 +38,7 @@ rayon = { workspace = true }
 
 bytes = { workspace = true }
 chrono = { workspace = true }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

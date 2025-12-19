@@ -1,13 +1,13 @@
 //! Production-grade mining pool implementation with Stratum protocol support
 
-use crate::{Miner, MinerConfig, PoWConfig, PoWError, Result, WorkPackage, WorkProof};
+use crate::{Miner, MinerConfig, PoWConfig, PoWError, Result, WorkPackage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Configuration for a mining pool
 #[derive(Debug, Clone, Copy)]
@@ -56,6 +56,23 @@ pub struct PoolStats {
     pub total_earnings: u128,
     pub pool_fee_collected: u128,
     pub uptime_seconds: u64,
+}
+
+/// Detailed pool statistics with efficiency metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolDetailedStats {
+    pub connected_miners: usize,
+    pub total_hashrate: f64,
+    pub shares_accepted: u64,
+    pub shares_rejected: u64,
+    pub blocks_found: u64,
+    pub total_earnings: u128,
+    pub pool_fee_collected: u128,
+    pub uptime_seconds: u64,
+    pub total_shares: u64,
+    pub block_shares: u64,
+    pub pool_efficiency: f64,
+    pub average_miner_hashrate: f64,
 }
 
 impl PoolStats {
@@ -332,12 +349,37 @@ impl MiningPool {
             .collect()
     }
 
+    /// Validate miner address format
+    pub fn validate_miner_address(address: &[u8]) -> Result<()> {
+        // Miner address must be 20 bytes (160 bits) for compatibility
+        if address.len() != 20 {
+            return Err(PoWError::PoolError(
+                format!("Invalid miner address length: expected 20 bytes, got {}", address.len()),
+            ));
+        }
+
+        // Address cannot be all zeros
+        if address.iter().all(|&b| b == 0) {
+            return Err(PoWError::PoolError("Miner address cannot be all zeros".to_string()));
+        }
+
+        // Address cannot be all ones
+        if address.iter().all(|&b| b == 0xFF) {
+            return Err(PoWError::PoolError("Miner address cannot be all ones".to_string()));
+        }
+
+        Ok(())
+    }
+
     /// Calculate miner payout (100% of block reward minus pool fee)
     pub async fn calculate_miner_payout(
         &self,
         miner_id: &[u8],
         total_block_reward: u128,
     ) -> Result<u128> {
+        // Validate miner ID
+        Self::validate_miner_address(miner_id)?;
+
         let shares = self.get_miner_shares(miner_id).await;
 
         if shares.is_empty() {
@@ -362,6 +404,29 @@ impl MiningPool {
         let miner_payout = (reward_after_fee as f64 * miner_percentage) as u128;
 
         Ok(miner_payout)
+    }
+
+    /// Process payout to miner with validation
+    pub async fn process_payout(&self, miner_address: &[u8], amount: u128) -> Result<()> {
+        // Validate address
+        Self::validate_miner_address(miner_address)?;
+
+        // Validate amount
+        if amount == 0 {
+            return Err(PoWError::PoolError("Payout amount cannot be zero".to_string()));
+        }
+
+        // Update miner account
+        let mut accounts = self.miner_accounts.write().await;
+        if let Some(account) = accounts.get_mut(miner_address) {
+            account.pending_payout += amount;
+            account.total_earnings += amount;
+            debug!("Payout processed for miner: {} satoshis", amount);
+        } else {
+            return Err(PoWError::PoolError("Miner account not found".to_string()));
+        }
+
+        Ok(())
     }
 
     /// Get miner account information
@@ -411,6 +476,94 @@ impl MiningPool {
     pub async fn add_pool_fee(&self, amount: u128) {
         let mut stats = self.stats.write().await;
         stats.pool_fee_collected += amount;
+    }
+
+    /// Get average hashrate across all miners
+    pub async fn get_average_hashrate(&self) -> f64 {
+        let miners = self.miners.read().await;
+        if miners.is_empty() {
+            return 0.0;
+        }
+
+        let mut total_hashrate = 0.0;
+        for miner in miners.values() {
+            let stats = miner.get_stats().await;
+            total_hashrate += stats.hashrate;
+        }
+
+        total_hashrate / miners.len() as f64
+    }
+
+    /// Get pool efficiency (blocks found / expected blocks)
+    pub async fn get_pool_efficiency(&self) -> f64 {
+        let _stats = self.stats.read().await;
+        let shares = self.shares.read().await;
+
+        if shares.is_empty() {
+            return 0.0;
+        }
+
+        let block_shares: u64 = shares.iter().filter(|s| s.is_block).map(|s| s.difficulty).sum();
+        let total_shares: u64 = shares.iter().map(|s| s.difficulty).sum();
+
+        if total_shares == 0 {
+            return 0.0;
+        }
+
+        (block_shares as f64 / total_shares as f64) * 100.0
+    }
+
+    /// Get top miners by shares
+    pub async fn get_top_miners(&self, limit: usize) -> Vec<(Vec<u8>, u64)> {
+        let shares = self.shares.read().await;
+        let mut miner_shares: HashMap<Vec<u8>, u64> = HashMap::new();
+
+        for share in shares.iter() {
+            *miner_shares.entry(share.miner_id.clone()).or_insert(0) += share.difficulty;
+        }
+
+        let mut top_miners: Vec<_> = miner_shares.into_iter().collect();
+        top_miners.sort_by(|a, b| b.1.cmp(&a.1));
+        top_miners.into_iter().take(limit).collect()
+    }
+
+    /// Get pool statistics with detailed metrics
+    pub async fn get_detailed_stats(&self) -> PoolDetailedStats {
+        let stats = self.stats.read().await.clone();
+        let miners = self.miners.read().await;
+        let shares = self.shares.read().await;
+
+        let total_shares: u64 = shares.iter().map(|s| s.difficulty).sum();
+        let block_shares: u64 = shares.iter().filter(|s| s.is_block).map(|s| s.difficulty).sum();
+
+        let mut total_hashrate = 0.0;
+        for miner in miners.values() {
+            let miner_stats = miner.get_stats().await;
+            total_hashrate += miner_stats.hashrate;
+        }
+
+        PoolDetailedStats {
+            connected_miners: stats.connected_miners,
+            total_hashrate,
+            shares_accepted: stats.shares_accepted,
+            shares_rejected: stats.shares_rejected,
+            blocks_found: stats.blocks_found,
+            total_earnings: stats.total_earnings,
+            pool_fee_collected: stats.pool_fee_collected,
+            uptime_seconds: stats.uptime_seconds,
+            total_shares,
+            block_shares,
+            pool_efficiency: if total_shares > 0 {
+                (block_shares as f64 / total_shares as f64) * 100.0
+            } else {
+                0.0
+            },
+            average_miner_hashrate: if miners.is_empty() {
+                0.0
+            } else {
+                total_hashrate / miners.len() as f64
+            },
+        }
     }
 }
 

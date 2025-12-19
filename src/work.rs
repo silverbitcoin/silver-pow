@@ -80,7 +80,7 @@ impl WorkPackage {
     /// Calculate target from difficulty using proper big integer arithmetic
     /// Target = MAX_TARGET / difficulty
     /// MAX_TARGET = 2^512 - 1 (for SHA-512)
-    fn calculate_target_from_difficulty(difficulty: u64) -> Result<Vec<u8>> {
+    pub fn calculate_target_from_difficulty(difficulty: u64) -> Result<Vec<u8>> {
         if difficulty == 0 {
             return Err(PoWError::InvalidDifficulty("Difficulty cannot be zero".to_string()));
         }

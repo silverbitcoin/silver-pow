@@ -55,7 +55,7 @@ impl DifficultyCalculator {
         &self,
         current_difficulty: u64,
         actual_block_times: &[u64],
-        block_height: u64,
+        _block_height: u64,
     ) -> Result<u64> {
         if actual_block_times.is_empty() {
             return Ok(current_difficulty);

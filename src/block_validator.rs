@@ -195,8 +195,8 @@ impl BlockValidator {
             let bytes_to_zero = (bits_to_shift / 8) as usize;
 
             if bytes_to_zero < 64 {
-                for i in (64 - bytes_to_zero)..64 {
-                    target[i] = 0;
+                for byte in target.iter_mut().skip(64 - bytes_to_zero).take(bytes_to_zero) {
+                    *byte = 0;
                 }
 
                 if bytes_to_zero > 0 && bytes_to_zero < 64 {

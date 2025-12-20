@@ -275,7 +275,7 @@ impl StratumServer {
         });
 
         writer
-            .write_all(format!("{}\n", subscribe_response.to_string()).as_bytes())
+            .write_all(format!("{}\n", subscribe_response).as_bytes())
             .await?;
 
         loop {
@@ -350,7 +350,7 @@ impl StratumServer {
                                         "error": null
                                     });
                                     writer
-                                        .write_all(format!("{}\n", auth_response.to_string()).as_bytes())
+                                        .write_all(format!("{}\n", auth_response).as_bytes())
                                         .await?;
                                 }
                                 "mining.submit" => {
@@ -370,7 +370,7 @@ impl StratumServer {
                                             "error": null
                                         });
                                         writer
-                                            .write_all(format!("{}\n", submit_response.to_string()).as_bytes())
+                                            .write_all(format!("{}\n", submit_response).as_bytes())
                                             .await?;
 
                                         debug!("Share submitted by {} ({}) with nonce {}", client_id, remote_addr, nonce);
@@ -425,8 +425,8 @@ impl StratumServer {
                     hex::encode(&work.work_id),
                     hex::encode(&work.parent_hash),
                     hex::encode(&work.merkle_root),
-                    hex::encode(&work.version.to_le_bytes()),
-                    hex::encode(&work.difficulty.to_le_bytes()),
+                    hex::encode(work.version.to_le_bytes()),
+                    hex::encode(work.difficulty.to_le_bytes()),
                     work.timestamp,
                     false  // clean_jobs flag
                 ]

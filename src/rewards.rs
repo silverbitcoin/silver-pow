@@ -1,4 +1,4 @@
-//! Block reward calculation and distribution (75% PoW, 25% PoS)
+//! Block reward calculation and distribution (100% PoW)
 
 use crate::{PoWConfig, Result};
 use serde::{Deserialize, Serialize};
@@ -83,7 +83,7 @@ impl RewardCalculator {
 
     /// Check if halving occurs at this block
     pub fn is_halving_block(&self, block_height: u64) -> bool {
-        block_height > 0 && block_height % self.config.halving_interval == 0
+        block_height > 0 && block_height.is_multiple_of(self.config.halving_interval)
     }
 
     /// Get next halving block height

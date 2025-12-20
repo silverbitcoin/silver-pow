@@ -13,6 +13,8 @@ pub mod mining_pool;
 pub mod rewards;
 pub mod work;
 pub mod stratum;
+pub mod stratum_pool;
+pub mod stratum_client;
 pub mod block_validator;
 pub mod consensus;
 
@@ -22,6 +24,7 @@ pub use mining_pool::{MiningPool, PoolConfig, PoolStats, PoolDetailedStats, Mine
 pub use rewards::{BlockReward, RewardCalculator};
 pub use work::{WorkPackage, WorkProof};
 pub use stratum::{StratumServer, StratumMessage, StratumClient};
+pub use stratum_client::StratumClient as StratumPoolClient;
 pub use block_validator::{BlockValidator, BlockHeader};
 pub use consensus::{PoWConsensus, ChainState, BlockRecord, ConsensusStats};
 

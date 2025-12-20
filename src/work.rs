@@ -98,8 +98,8 @@ impl WorkPackage {
 
             if bytes_to_zero < 64 {
                 // Zero out the lower bytes
-                for i in (64 - bytes_to_zero)..64 {
-                    target[i] = 0;
+                for byte in target.iter_mut().skip(64 - bytes_to_zero).take(bytes_to_zero) {
+                    *byte = 0;
                 }
 
                 // Adjust the boundary byte

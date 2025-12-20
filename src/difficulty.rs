@@ -1,4 +1,4 @@
-//! Difficulty adjustment algorithm (Kadena-style)
+//! Difficulty adjustment algorithm 
 
 use crate::{PoWConfig, PoWError, Result};
 use serde::{Deserialize, Serialize};
@@ -132,7 +132,7 @@ impl DifficultyCalculator {
 
     /// Check if difficulty adjustment is needed
     pub fn should_adjust(&self, block_height: u64) -> bool {
-        block_height % self.config.difficulty_adjustment_interval == 0
+        block_height.is_multiple_of(self.config.difficulty_adjustment_interval)
             && block_height > 0
     }
 

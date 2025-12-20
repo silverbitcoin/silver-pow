@@ -39,14 +39,29 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
+# HTTP client for RPC and Stratum
+reqwest = { version = "0.11", features = ["json"] }
+clap = { version = "4.4", features = ["derive"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = { workspace = true }
 criterion = { workspace = true }
-clap = { workspace = true }
-num_cpus = "1.16"
-tracing-subscriber = { workspace = true }
+
+# Mining dependencies
+reqwest = { version = "0.11", features = ["json"] }
+clap = { version = "4.4", features = ["derive"] }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
 [[bench]]
 name = "pow_benchmarks"
 harness = false
+
+[[bin]]
+name = "cpu_miner_real"
+path = "src/bin/cpu_miner_real.rs"
+
+[[bin]]
+name = "stratum_pool"
+path = "src/stratum_pool.rs"

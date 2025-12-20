@@ -191,7 +191,7 @@ impl Miner {
             }
 
             // Periodically check for new work (every 1M hashes)
-            if nonce % 1_000_000 == 0 {
+            if nonce.is_multiple_of(1_000_000) {
                 if let Some(new_work) = self.get_current_work().await {
                     if new_work.work_id != work.work_id {
                         debug!("Switching to new work package after {} hashes", nonce);

@@ -280,7 +280,7 @@ impl StratumClient {
         
         match conn.as_mut() {
             Some((_, writer)) => {
-                let request_str = format!("{}\n", request.to_string());
+                let request_str = format!("{}\n", request);
                 match writer.write_all(request_str.as_bytes()).await {
                     Ok(_) => {
                         if let Some(method) = request.get("method") {

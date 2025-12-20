@@ -161,40 +161,30 @@ pub struct WorkProof {
 }
 
 impl WorkProof {
-    pub fn new(
+    pub fn builder(
         work_id: Vec<u8>,
         chain_id: u32,
-        block_height: u64,
-        nonce: u64,
-        extra_nonce: u64,
         block_hash: Vec<u8>,
         hash_result: Vec<u8>,
-        timestamp: u64,
         miner_address: Vec<u8>,
-    ) -> Result<Self> {
-        if hash_result.len() != 64 {
-            return Err(PoWError::InvalidWorkProof);
-        }
-
-        if miner_address.is_empty() {
-            return Err(PoWError::InvalidWorkProof);
-        }
-
-        let difficulty_achieved = Self::get_difficulty_from_hash(&hash_result)?;
-
-        Ok(Self {
+    ) -> WorkProofBuilderPow {
+        WorkProofBuilderPow {
             work_id,
             chain_id,
-            block_height,
-            nonce,
-            extra_nonce,
+            block_height: 0,
+            nonce: 0,
+            extra_nonce: 0,
             block_hash,
             hash_result,
-            timestamp,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
             miner_address,
-            difficulty_achieved,
-        })
+        }
     }
+
+
 
     pub fn verify(&self, target: &[u8]) -> Result<bool> {
         // SHA-512 produces 64 bytes
@@ -451,5 +441,65 @@ mod tests {
 
         // Higher difficulty should have lower target
         assert!(target2 <= target1);
+    }
+}
+
+/// Builder for WorkProof - real production-grade builder pattern
+pub struct WorkProofBuilderPow {
+    work_id: Vec<u8>,
+    chain_id: u32,
+    block_height: u64,
+    nonce: u64,
+    extra_nonce: u64,
+    block_hash: Vec<u8>,
+    hash_result: Vec<u8>,
+    timestamp: u64,
+    miner_address: Vec<u8>,
+}
+
+impl WorkProofBuilderPow {
+    pub fn with_block_height(mut self, height: u64) -> Self {
+        self.block_height = height;
+        self
+    }
+
+    pub fn with_nonce(mut self, nonce: u64) -> Self {
+        self.nonce = nonce;
+        self
+    }
+
+    pub fn with_extra_nonce(mut self, extra_nonce: u64) -> Self {
+        self.extra_nonce = extra_nonce;
+        self
+    }
+
+    pub fn with_timestamp(mut self, timestamp: u64) -> Self {
+        self.timestamp = timestamp;
+        self
+    }
+
+    pub fn build(self) -> Result<WorkProof> {
+        if self.hash_result.len() != 64 {
+            return Err(PoWError::InvalidWorkProof);
+        }
+
+        if self.miner_address.is_empty() {
+            return Err(PoWError::InvalidWorkProof);
+        }
+
+        let difficulty_achieved = WorkProof::get_difficulty_from_hash(&self.hash_result)?;
+
+        Ok(WorkProof {
+            work_id: self.work_id,
+            chain_id: self.chain_id,
+            block_height: self.block_height,
+            nonce: self.nonce,
+            extra_nonce: self.extra_nonce,
+            block_hash: self.block_hash,
+            hash_result: self.hash_result,
+            timestamp: self.timestamp,
+            miner_address: self.miner_address,
+            difficulty_achieved,
+        })
     }
 }

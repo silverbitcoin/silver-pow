@@ -21,41 +21,26 @@ pub struct BlockHeader {
 }
 
 impl BlockHeader {
-    pub fn new(
+    pub fn builder(
         version: u32,
         parent_hash: Vec<u8>,
         merkle_root: Vec<u8>,
         timestamp: u64,
-        difficulty: u64,
-        chain_id: u32,
-        block_height: u64,
-        nonce: u64,
-        extra_nonce: u64,
-    ) -> Result<Self> {
-        if parent_hash.len() != 32 {
-            return Err(PoWError::InvalidBlock("Invalid parent hash length".to_string()));
-        }
-
-        if merkle_root.len() != 32 {
-            return Err(PoWError::InvalidBlock("Invalid merkle root length".to_string()));
-        }
-
-        if difficulty == 0 {
-            return Err(PoWError::InvalidBlock("Difficulty cannot be zero".to_string()));
-        }
-
-        Ok(Self {
+    ) -> BlockHeaderBuilderValidator {
+        BlockHeaderBuilderValidator {
             version,
             parent_hash,
             merkle_root,
             timestamp,
-            difficulty,
-            chain_id,
-            block_height,
-            nonce,
-            extra_nonce,
-        })
+            difficulty: 1,
+            chain_id: 0,
+            block_height: 0,
+            nonce: 0,
+            extra_nonce: 0,
+        }
     }
+
+
 
     pub fn hash(&self) -> Vec<u8> {
         let mut hasher = Sha512::new();
@@ -413,5 +398,71 @@ mod tests {
         // Invalid adjustments
         assert!(validator.validate_difficulty_adjustment(base_diff, base_diff * 5).is_err());
         assert!(validator.validate_difficulty_adjustment(base_diff, base_diff / 5).is_err());
+    }
+}
+
+/// Builder for BlockHeader - real production-grade builder pattern
+pub struct BlockHeaderBuilderValidator {
+    version: u32,
+    parent_hash: Vec<u8>,
+    merkle_root: Vec<u8>,
+    timestamp: u64,
+    difficulty: u64,
+    chain_id: u32,
+    block_height: u64,
+    nonce: u64,
+    extra_nonce: u64,
+}
+
+impl BlockHeaderBuilderValidator {
+    pub fn with_difficulty(mut self, difficulty: u64) -> Self {
+        self.difficulty = difficulty;
+        self
+    }
+
+    pub fn with_chain_id(mut self, chain_id: u32) -> Self {
+        self.chain_id = chain_id;
+        self
+    }
+
+    pub fn with_block_height(mut self, height: u64) -> Self {
+        self.block_height = height;
+        self
+    }
+
+    pub fn with_nonce(mut self, nonce: u64) -> Self {
+        self.nonce = nonce;
+        self
+    }
+
+    pub fn with_extra_nonce(mut self, extra_nonce: u64) -> Self {
+        self.extra_nonce = extra_nonce;
+        self
+    }
+
+    pub fn build(self) -> Result<BlockHeader> {
+        if self.parent_hash.len() != 32 {
+            return Err(PoWError::InvalidBlock("Invalid parent hash length".to_string()));
+        }
+
+        if self.merkle_root.len() != 32 {
+            return Err(PoWError::InvalidBlock("Invalid merkle root length".to_string()));
+        }
+
+        if self.difficulty == 0 {
+            return Err(PoWError::InvalidBlock("Difficulty cannot be zero".to_string()));
+        }
+
+        Ok(BlockHeader {
+            version: self.version,
+            parent_hash: self.parent_hash,
+            merkle_root: self.merkle_root,
+            timestamp: self.timestamp,
+            difficulty: self.difficulty,
+            chain_id: self.chain_id,
+            block_height: self.block_height,
+            nonce: self.nonce,
+            extra_nonce: self.extra_nonce,
+        })
     }
 }

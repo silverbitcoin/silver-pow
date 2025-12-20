@@ -386,7 +386,7 @@ async fn handle_miner_connection(
                                     "error": "Invalid method"
                                 });
                                 let _ = writer.write_all(
-                                    format!("{}\n", error_response.to_string()).as_bytes()
+                                    format!("{}\n", error_response).as_bytes()
                                 ).await;
                                 continue;
                             }
@@ -461,9 +461,9 @@ async fn handle_miner_connection(
                                         "result": false,
                                         "error": "Not authorized"
                                     })
-                                } else {
+                                } else if let Some(mid) = miner_id.as_ref() {
                                     // Extract share parameters
-                                    let worker_name = match params.get(0) {
+                                    let worker_name = match params.first() {
                                         Some(Value::String(w)) => w.clone(),
                                         _ => "unknown".to_string(),
                                     };
@@ -496,8 +496,7 @@ async fn handle_miner_connection(
                                     };
 
                                     // Submit share to pool
-                                    let mid = miner_id.as_ref().unwrap().clone();
-                                    match pool.submit_share(&mid, nonce, hash.clone()).await {
+                                    match pool.submit_share(mid, nonce, hash.clone()).await {
                                         Ok(valid) => {
                                             if valid {
                                                 info!("Valid share from {}: worker={}, job={}, nonce={}", 
@@ -522,6 +521,12 @@ async fn handle_miner_connection(
                                             })
                                         }
                                     }
+                                } else {
+                                    json!({
+                                        "id": request_id,
+                                        "result": false,
+                                        "error": "Not authorized"
+                                    })
                                 }
                             }
                             "mining.get_transactions" => {
@@ -552,7 +557,7 @@ async fn handle_miner_connection(
                         };
 
                         // Send response
-                        let response_str = format!("{}\n", response.to_string());
+                        let response_str = format!("{}\n", response);
                         if let Err(e) = writer.write_all(response_str.as_bytes()).await {
                             error!("Failed to write response to {}: {}", peer_addr, e);
                             break;
@@ -569,7 +574,7 @@ async fn handle_miner_connection(
                         });
                         
                         if let Err(write_err) = writer.write_all(
-                            format!("{}\n", error_response.to_string()).as_bytes()
+                            format!("{}\n", error_response).as_bytes()
                         ).await {
                             error!("Failed to send error response to {}: {}", peer_addr, write_err);
                             break;

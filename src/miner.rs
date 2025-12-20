@@ -140,20 +140,23 @@ impl Miner {
             if hash_result.as_slice() <= target.as_slice() {
                 let proof_time = start_time.elapsed().as_secs();
 
-                let proof = WorkProof::new(
+                let proof = WorkProof::builder(
                     work_id.clone(),
                     chain_id,
-                    block_height,
-                    nonce,
-                    extra_nonce,
                     block_hash.clone(),
                     hash_result,
+                    miner_address,
+                )
+                .with_block_height(block_height)
+                .with_nonce(nonce)
+                .with_extra_nonce(extra_nonce)
+                .with_timestamp(
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs(),
-                    miner_address,
-                )?;
+                )
+                .build()?;
 
                 // Update stats
                 let mut stats = self.stats.write().await;

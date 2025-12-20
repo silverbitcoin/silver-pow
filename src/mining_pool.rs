@@ -112,41 +112,29 @@ pub struct MinerShare {
 }
 
 impl MinerShare {
-    pub fn new(
+    pub fn builder(
         miner_id: Vec<u8>,
         work_id: Vec<u8>,
-        nonce: u64,
-        extra_nonce: u64,
         hash_result: Vec<u8>,
-        difficulty: u64,
-        is_block: bool,
-        chain_id: u32,
-        block_height: u64,
-    ) -> Result<Self> {
-        if hash_result.len() != 64 {
-            return Err(PoWError::PoolError("Invalid hash result length".to_string()));
-        }
-
-        if miner_id.is_empty() {
-            return Err(PoWError::PoolError("Miner ID cannot be empty".to_string()));
-        }
-
-        Ok(Self {
+    ) -> MinerShareBuilder {
+        MinerShareBuilder {
             miner_id,
             work_id,
-            nonce,
-            extra_nonce,
+            nonce: 0,
+            extra_nonce: 0,
             hash_result,
-            difficulty,
+            difficulty: 1,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
-            is_block,
-            chain_id,
-            block_height,
-        })
+            is_block: false,
+            chain_id: 0,
+            block_height: 0,
+        }
     }
+
+
 }
 
 /// Miner account in the pool
@@ -674,5 +662,79 @@ mod tests {
         pool.add_pool_fee(1_000_000).await;
         let fee = pool.get_pool_fee_collected().await;
         assert_eq!(fee, 1_000_000);
+    }
+}
+
+/// Builder for MinerShare - real production-grade builder pattern
+pub struct MinerShareBuilder {
+    miner_id: Vec<u8>,
+    work_id: Vec<u8>,
+    nonce: u64,
+    extra_nonce: u64,
+    hash_result: Vec<u8>,
+    difficulty: u64,
+    timestamp: u64,
+    is_block: bool,
+    chain_id: u32,
+    block_height: u64,
+}
+
+impl MinerShareBuilder {
+    pub fn with_nonce(mut self, nonce: u64) -> Self {
+        self.nonce = nonce;
+        self
+    }
+
+    pub fn with_extra_nonce(mut self, extra_nonce: u64) -> Self {
+        self.extra_nonce = extra_nonce;
+        self
+    }
+
+    pub fn with_difficulty(mut self, difficulty: u64) -> Self {
+        self.difficulty = difficulty;
+        self
+    }
+
+    pub fn with_timestamp(mut self, timestamp: u64) -> Self {
+        self.timestamp = timestamp;
+        self
+    }
+
+    pub fn with_is_block(mut self, is_block: bool) -> Self {
+        self.is_block = is_block;
+        self
+    }
+
+    pub fn with_chain_id(mut self, chain_id: u32) -> Self {
+        self.chain_id = chain_id;
+        self
+    }
+
+    pub fn with_block_height(mut self, height: u64) -> Self {
+        self.block_height = height;
+        self
+    }
+
+    pub fn build(self) -> Result<MinerShare> {
+        if self.hash_result.len() != 64 {
+            return Err(PoWError::PoolError("Invalid hash result length".to_string()));
+        }
+
+        if self.miner_id.is_empty() {
+            return Err(PoWError::PoolError("Miner ID cannot be empty".to_string()));
+        }
+
+        Ok(MinerShare {
+            miner_id: self.miner_id,
+            work_id: self.work_id,
+            nonce: self.nonce,
+            extra_nonce: self.extra_nonce,
+            hash_result: self.hash_result,
+            difficulty: self.difficulty,
+            timestamp: self.timestamp,
+            is_block: self.is_block,
+            chain_id: self.chain_id,
+            block_height: self.block_height,
+        })
     }
 }

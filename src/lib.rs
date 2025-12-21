@@ -17,6 +17,11 @@ pub mod stratum_pool;
 pub mod stratum_client;
 pub mod block_validator;
 pub mod consensus;
+pub mod block_builder;
+pub mod block_submission;
+pub mod reward_distribution;
+pub mod difficulty_adjustment;
+pub mod transaction_engine;
 
 pub use difficulty::{DifficultyAdjustment, DifficultyCalculator};
 pub use miner::{Miner, MinerConfig, MinerStats};
@@ -27,6 +32,11 @@ pub use stratum::{StratumServer, StratumMessage, StratumClient};
 pub use stratum_client::StratumClient as StratumPoolClient;
 pub use block_validator::{BlockValidator, BlockHeader};
 pub use consensus::{PoWConsensus, ChainState, BlockRecord, ConsensusStats};
+pub use block_builder::{Block, BlockBuilder, BlockHeader as BH, CoinbaseTransaction};
+pub use block_submission::{BlockSubmissionHandler, BlockSubmissionResult, SubmissionStatus};
+pub use reward_distribution::{RewardDistributionManager, MinerRewardAccount, BlockRewardRecord, RewardStats};
+pub use difficulty_adjustment::{DifficultyAdjustmentManager, DifficultyAdjustmentRecord, DifficultyStats};
+pub use transaction_engine::{TransactionEngine, Transaction, TransactionStatus, TransactionEngineStats};
 
 use thiserror::Error;
 

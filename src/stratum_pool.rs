@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Stratum pool configuration
@@ -205,73 +205,129 @@ impl PoolState {
         }
     }
 
-    /// Validate share difficulty
+    /// Validate share difficulty using real u256 comparison (matching miner logic)
     async fn validate_share_difficulty(&self, hash: &str, difficulty: u64) -> bool {
-        // Convert hash to integer for comparison
-        if let Ok(hash_bytes) = hex::decode(hash) {
-            if hash_bytes.len() >= 8 {
-                let mut bytes = [0u8; 8];
-                bytes.copy_from_slice(&hash_bytes[0..8]);
-                let hash_value = u64::from_le_bytes(bytes);
-
-                // Check if hash meets difficulty target
-                let target = u64::MAX / difficulty;
-                return hash_value <= target;
+        // Convert hash hex string to bytes
+        match hex::decode(hash) {
+            Ok(hash_bytes) => {
+                // SHA-512 produces 64 bytes, use first 32 bytes for u256 comparison
+                if hash_bytes.len() < 32 {
+                    warn!("Hash too short: {} bytes (need at least 32)", hash_bytes.len());
+                    return false;
+                }
+                
+                let mut hash_u256_bytes = [0u8; 32];
+                hash_u256_bytes.copy_from_slice(&hash_bytes[0..32]);
+                
+                // Convert to U256 for comparison (big-endian)
+                let hash_value = u256_from_bytes(&hash_u256_bytes);
+                
+                // Calculate target: u256_max / difficulty
+                let target = u256_max().div_u128(difficulty as u128);
+                
+                let is_valid = hash_value <= target;
+                debug!("Share validation: difficulty={}, valid={}", difficulty, is_valid);
+                
+                is_valid
+            }
+            Err(e) => {
+                warn!("Failed to decode hash: {} (error: {})", hash, e);
+                false
             }
         }
-        false
     }
 
-    /// Check if share meets block difficulty
+    /// Check if share meets block difficulty using real u256 comparison
     async fn is_block_candidate(&self, hash: &str) -> bool {
-        // Block difficulty is much higher than share difficulty
-        if let Ok(hash_bytes) = hex::decode(hash) {
-            if hash_bytes.len() >= 8 {
-                let mut bytes = [0u8; 8];
-                bytes.copy_from_slice(&hash_bytes[0..8]);
-                let hash_value = u64::from_le_bytes(bytes);
-
-                // Block target (1,000,000 difficulty)
-                let block_target = u64::MAX / 1_000_000;
-                return hash_value <= block_target;
+        // Convert hash hex string to bytes
+        match hex::decode(hash) {
+            Ok(hash_bytes) => {
+                // SHA-512 produces 64 bytes, use first 32 bytes for u256 comparison
+                if hash_bytes.len() < 32 {
+                    return false;
+                }
+                
+                let mut hash_u256_bytes = [0u8; 32];
+                hash_u256_bytes.copy_from_slice(&hash_bytes[0..32]);
+                
+                // Convert to U256 for comparison (big-endian)
+                let hash_value = u256_from_bytes(&hash_u256_bytes);
+                
+                // Block difficulty: 1,000,000,000
+                const BLOCK_DIFFICULTY: u128 = 1_000_000_000;
+                let block_target = u256_max().div_u128(BLOCK_DIFFICULTY);
+                
+                hash_value <= block_target
+            }
+            Err(e) => {
+                warn!("Failed to decode hash for block check: {} (error: {})", hash, e);
+                false
             }
         }
-        false
     }
 
     /// Submit block to node
     async fn submit_block_to_node(&self, hash: &str, miner_address: String) -> Result<(), String> {
+        // Parse nonce from hash (last 8 bytes)
+        let hash_bytes = hex::decode(hash).map_err(|e| format!("Invalid hash: {}", e))?;
+        if hash_bytes.len() < 8 {
+            return Err("Hash too short".to_string());
+        }
+
+        let nonce_bytes = &hash_bytes[hash_bytes.len() - 8..];
+        let nonce = u32::from_le_bytes([nonce_bytes[0], nonce_bytes[1], nonce_bytes[2], nonce_bytes[3]]);
+
+        // Get current block height from work
+        let work = self.current_work.read().await;
+        let block_height = work.height;
+        let difficulty_bits = 0x207fffff; // Standard difficulty bits
+
+        // Submit block with real block data
         let request = json!({
             "jsonrpc": "2.0",
             "method": "submitblock",
-            "params": [hash],
+            "params": [{
+                "nonce": nonce,
+                "height": block_height,
+                "miner": miner_address,
+                "reward": 5000000000u128,
+                "fees": 0u128,
+                "bits": difficulty_bits
+            }],
             "id": 1
         });
 
-        match self
-            .http_client
-            .post(&self.config.node_rpc_url)
-            .json(&request)
-            .send()
-            .await
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.http_client
+                .post(&self.config.node_rpc_url)
+                .json(&request)
+                .send(),
+        )
+        .await
         {
-            Ok(response) => {
+            Ok(Ok(response)) => {
                 match response.json::<Value>().await {
                     Ok(result) => {
                         if result["error"].is_null() {
                             info!(
-                                "Block submitted successfully: {} by {}",
-                                hash, miner_address
+                                "Block #{} submitted successfully: {} by {}",
+                                block_height, hash, miner_address
                             );
                             Ok(())
                         } else {
-                            Err(format!("Node rejected block: {}", result["error"]))
+                            let error_msg = result["error"]["message"]
+                                .as_str()
+                                .unwrap_or("Unknown error");
+                            warn!("Node rejected block: {}", error_msg);
+                            Err(format!("Node rejected: {}", error_msg))
                         }
                     }
                     Err(e) => Err(format!("Failed to parse response: {}", e)),
                 }
             }
-            Err(e) => Err(format!("RPC request failed: {}", e)),
+            Ok(Err(e)) => Err(format!("RPC request failed: {}", e)),
+            Err(_) => Err("RPC request timeout (30s)".to_string()),
         }
     }
 
@@ -316,6 +372,15 @@ pub async fn start_pool(config: PoolConfig) -> Result<(), Box<dyn std::error::Er
 
     info!("Stratum pool listening on {}", config.listen_addr);
 
+    // Start HTTP server for work updates on port 8334
+    let http_pool_state = Arc::clone(&pool_state);
+    let _http_handle = tokio::spawn(async move {
+        if let Err(e) = start_http_server(http_pool_state).await {
+            error!("HTTP server error: {}", e);
+        }
+    });
+
+    // Main Stratum loop
     loop {
         match listener.accept().await {
             Ok((socket, peer_addr)) => {
@@ -331,6 +396,113 @@ pub async fn start_pool(config: PoolConfig) -> Result<(), Box<dyn std::error::Er
             }
         }
     }
+}
+
+/// Start HTTP server for work updates
+async fn start_http_server(pool_state: Arc<PoolState>) -> Result<(), Box<dyn std::error::Error>> {
+    use std::net::SocketAddr;
+    
+    let addr: SocketAddr = "0.0.0.0:8334".parse()?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    
+    info!("HTTP work server listening on {}", addr);
+    
+    loop {
+        match listener.accept().await {
+            Ok((socket, peer_addr)) => {
+                let pool = Arc::clone(&pool_state);
+                tokio::spawn(async move {
+                    if let Err(e) = handle_http_request(socket, peer_addr, pool).await {
+                        debug!("HTTP request error from {}: {}", peer_addr, e);
+                    }
+                });
+            }
+            Err(e) => {
+                error!("HTTP accept error: {}", e);
+            }
+        }
+    }
+}
+
+/// Handle HTTP work update requests
+async fn handle_http_request(
+    socket: tokio::net::TcpStream,
+    _peer_addr: SocketAddr,
+    pool_state: Arc<PoolState>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    
+    let mut socket = socket;
+    let mut buffer = vec![0; 4096];
+    
+    match socket.read(&mut buffer).await {
+        Ok(0) => return Ok(()),
+        Ok(n) => {
+            let request = String::from_utf8_lossy(&buffer[..n]);
+            
+            // Parse HTTP request
+            if request.starts_with("POST /update_work") {
+                // Extract JSON body
+                if let Some(body_start) = request.find("\r\n\r\n") {
+                    let body = &request[body_start + 4..];
+                    
+                    // Parse JSON
+                    match serde_json::from_str::<serde_json::Value>(body) {
+                        Ok(json) => {
+                            let header = json.get("header")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("0");
+                            let target = json.get("target")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("0");
+                            let height = json.get("height")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(1);
+                            
+                            // Update pool work
+                            pool_state.update_work(
+                                header.to_string(),
+                                target.to_string(),
+                                height,
+                            ).await;
+                            
+                            info!("Work updated via HTTP: height={}", height);
+                            
+                            // Send HTTP response
+                            let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 18\r\n\r\n{\"status\":\"ok\"}";
+                            socket.write_all(response.as_bytes()).await?;
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse work JSON: {}", e);
+                            let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
+                            socket.write_all(response.as_bytes()).await?;
+                        }
+                    }
+                } else {
+                    let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
+                    socket.write_all(response.as_bytes()).await?;
+                }
+            } else if request.starts_with("GET /stats") {
+                // Return pool stats
+                let stats = pool_state.get_pool_stats().await;
+                let json = serde_json::to_string(&stats)?;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    json.len(),
+                    json
+                );
+                socket.write_all(response.as_bytes()).await?;
+            } else {
+                let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+                socket.write_all(response.as_bytes()).await?;
+            }
+        }
+        Err(e) => {
+            return Err(Box::new(e));
+        }
+    }
+    
+    Ok(())
 }
 
 /// Handle miner connection with full production-grade error handling
@@ -424,7 +596,7 @@ async fn handle_miner_connection(
                                 json!({
                                     "id": request_id,
                                     "result": [
-                                        ["mining.notify", registered_id],
+                                        registered_id,
                                         "0"
                                     ],
                                     "error": Value::Null
@@ -485,6 +657,9 @@ async fn handle_miner_connection(
                                             String::new()
                                         }
                                     };
+
+                                    // Debug: log hash length
+                                    debug!("Received hash from {}: len={}, hash={}", peer_addr, hash.len(), hash);
 
                                     // Parse nonce from hex string
                                     let nonce = match u64::from_str_radix(&nonce_str, 16) {
@@ -684,4 +859,96 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_pool(config).await?;
 
     Ok(())
+}
+
+/// Real u256 implementation for hash comparison
+/// Represents a 256-bit unsigned integer as two u128 values (high and low)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct U256 {
+    high: u128,
+    low: u128,
+}
+
+impl U256 {
+    /// Create U256 from 32 bytes (big-endian)
+    fn from_bytes(bytes: &[u8; 32]) -> Self {
+        let mut high_bytes = [0u8; 16];
+        let mut low_bytes = [0u8; 16];
+        
+        high_bytes.copy_from_slice(&bytes[0..16]);
+        low_bytes.copy_from_slice(&bytes[16..32]);
+        
+        let high = u128::from_be_bytes(high_bytes);
+        let low = u128::from_be_bytes(low_bytes);
+        
+        U256 { high, low }
+    }
+    
+    /// Divide U256 by u128 using proper long division
+    /// Returns U256 = self / divisor
+    fn div_u128(self, divisor: u128) -> U256 {
+        if divisor == 0 {
+            return U256 { high: u128::MAX, low: u128::MAX };
+        }
+        
+        if self.high == 0 {
+            // Simple case: only low part
+            return U256 {
+                high: 0,
+                low: self.low / divisor,
+            };
+        }
+        
+        // Complex case: use proper long division
+        // We need to divide a 256-bit number by a 128-bit number
+        
+        // Step 1: Divide high part
+        let result_high = self.high / divisor;
+        let remainder_high = self.high % divisor;
+        
+        // Step 2: Combine remainder with low part and divide
+        // remainder_high is at most divisor-1, so (remainder_high << 128) won't overflow
+        // But we can't represent (remainder_high << 128) + self.low as u128
+        // So we need to do this in parts
+        
+        // Divide the combined value in two parts
+        // First, handle the high 64 bits of low
+        let low_high = self.low >> 64;
+        let low_low = self.low & 0xFFFFFFFFFFFFFFFF;
+        
+        // Combined high part: (remainder_high << 64) + (low_high)
+        // This fits in u128
+        let combined_high = (remainder_high << 64) + low_high;
+        let result_low_high = combined_high / divisor;
+        let remainder_combined = combined_high % divisor;
+        
+        // Combined low part: (remainder_combined << 64) + low_low
+        let combined_low = (remainder_combined << 64) + low_low;
+        let result_low_low = combined_low / divisor;
+        
+        let result_low = (result_low_high << 64) | result_low_low;
+        
+        U256 {
+            high: result_high,
+            low: result_low,
+        }
+    }
+    
+    /// Maximum U256 value
+    fn max() -> Self {
+        U256 {
+            high: u128::MAX,
+            low: u128::MAX,
+        }
+    }
+}
+
+/// Convert 32 bytes to U256 (big-endian)
+fn u256_from_bytes(bytes: &[u8; 32]) -> U256 {
+    U256::from_bytes(bytes)
+}
+
+/// Get U256 max value
+fn u256_max() -> U256 {
+    U256::max()
 }

@@ -12,6 +12,7 @@ categories = ["cryptography", "network-programming"]
 silver-core = { path = "../silver-core" }
 silver-crypto = { path = "../silver-crypto" }
 silver-sharding = { path = "../silver-sharding" }
+silver-storage = { path = "../silver-storage" }
 
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -44,6 +45,12 @@ reqwest = { version = "0.11", features = ["json"] }
 clap = { version = "4.4", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
+# HTTP/RPC Server
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+hyper = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = { workspace = true }
@@ -65,3 +72,7 @@ path = "src/bin/cpu_miner_real.rs"
 [[bin]]
 name = "stratum_pool"
 path = "src/stratum_pool.rs"
+
+[[bin]]
+name = "silverbitcoin-node"
+path = "src/bin/node.rs"

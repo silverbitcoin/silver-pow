@@ -1,6 +1,5 @@
 //! Production-Grade CPU Miner for SilverBitcoin
 //! Real implementation with Stratum pool support
-//! FULL PRODUCTION IMPLEMENTATION - NO MOCKS, NO UNWRAP, NO PLACEHOLDERS
 
 use clap::Parser;
 use sha2::{Digest, Sha512};
@@ -9,18 +8,93 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
-/// Convert 32 bytes to u256 (big-endian)
-fn u256_from_bytes(bytes: &[u8; 32]) -> u128 {
-    let mut result = 0u128;
-    for &byte in bytes {
-        result = (result << 8) | (byte as u128);
-    }
-    result
+/// Real u256 implementation for hash comparison
+/// Represents a 256-bit unsigned integer as two u128 values (high and low)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct U256 {
+    high: u128,
+    low: u128,
 }
 
-/// Get maximum u256 value
-fn u256_max() -> u128 {
-    u128::MAX
+impl std::fmt::Display for U256 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.high == 0 {
+            write!(f, "{}", self.low)
+        } else {
+            write!(f, "{}_{:032x}", self.high, self.low)
+        }
+    }
+}
+
+impl U256 {
+    /// Create U256 from 32 bytes (big-endian)
+    fn from_bytes(bytes: &[u8; 32]) -> Self {
+        let mut high_bytes = [0u8; 16];
+        let mut low_bytes = [0u8; 16];
+        
+        high_bytes.copy_from_slice(&bytes[0..16]);
+        low_bytes.copy_from_slice(&bytes[16..32]);
+        
+        let high = u128::from_be_bytes(high_bytes);
+        let low = u128::from_be_bytes(low_bytes);
+        
+        U256 { high, low }
+    }
+    
+    /// Divide U256 by u128 using proper long division
+    /// Returns U256 = self / divisor
+    fn div_u128(self, divisor: u128) -> U256 {
+        if divisor == 0 {
+            return U256 { high: u128::MAX, low: u128::MAX };
+        }
+        
+        if self.high == 0 {
+            // Simple case: only low part
+            return U256 {
+                high: 0,
+                low: self.low / divisor,
+            };
+        }
+        
+        // Complex case: use proper long division
+        let result_high = self.high / divisor;
+        let remainder_high = self.high % divisor;
+        
+        let low_high = self.low >> 64;
+        let low_low = self.low & 0xFFFFFFFFFFFFFFFF;
+        
+        let combined_high = (remainder_high << 64) + low_high;
+        let result_low_high = combined_high / divisor;
+        let remainder_combined = combined_high % divisor;
+        
+        let combined_low = (remainder_combined << 64) + low_low;
+        let result_low_low = combined_low / divisor;
+        
+        let result_low = (result_low_high << 64) | result_low_low;
+        
+        U256 {
+            high: result_high,
+            low: result_low,
+        }
+    }
+    
+    /// Maximum U256 value
+    fn max() -> Self {
+        U256 {
+            high: u128::MAX,
+            low: u128::MAX,
+        }
+    }
+}
+
+/// Convert 32 bytes to U256 (big-endian)
+fn u256_from_bytes(bytes: &[u8; 32]) -> U256 {
+    U256::from_bytes(bytes)
+}
+
+/// Get maximum U256 value
+fn u256_max() -> U256 {
+    U256::max()
 }
 
 #[derive(Parser, Debug)]
@@ -181,8 +255,8 @@ async fn mining_loop(
         const POOL_DIFFICULTY: u128 = 1_000_000;
         const BLOCK_DIFFICULTY: u128 = 1_000_000_000;
 
-        let pool_target = u256_max() / POOL_DIFFICULTY;
-        let block_target = u256_max() / BLOCK_DIFFICULTY;
+        let pool_target = u256_max().div_u128(POOL_DIFFICULTY);
+        let block_target = u256_max().div_u128(BLOCK_DIFFICULTY);
 
         // Check if hash meets pool difficulty
         if hash_value <= pool_target {
@@ -190,7 +264,7 @@ async fn mining_loop(
 
             info!(
                 "Thread {}: Found share! Nonce: {}, Hash: {}",
-                thread_id, nonce, &hash_hex[0..16]
+                thread_id, nonce, hash_hex
             );
 
             // Submit to pool

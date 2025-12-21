@@ -1,6 +1,5 @@
 //! Production-Grade Stratum Client for Mining Pools
 //! Implements Stratum protocol v1 with real TCP socket communication
-//! FULL PRODUCTION IMPLEMENTATION - NO MOCKS, NO UNWRAP, NO PLACEHOLDERS
 
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -52,10 +51,14 @@ impl StratumClient {
 
     /// Connect to pool and perform handshake with full error handling
     pub async fn connect(&self) -> Result<(), String> {
+        // Parse pool URL to extract host and port
+        let (host, port) = Self::parse_pool_url(&self.pool_addr)?;
+        let addr = format!("{}:{}", host, port);
+        
         // Try to connect with retries
         let mut attempts = 0;
         loop {
-            match TcpStream::connect(&self.pool_addr).await {
+            match TcpStream::connect(&addr).await {
                 Ok(socket) => {
                     let (reader, writer) = socket.into_split();
                     let mut conn = self.connection.lock().await;
@@ -64,7 +67,7 @@ impl StratumClient {
                     let mut state = self.state.lock().await;
                     *state = ConnectionState::Connected;
                     
-                    info!("Connected to Stratum pool: {}", self.pool_addr);
+                    info!("Connected to Stratum pool: {}", addr);
                     break;
                 }
                 Err(e) => {
@@ -373,5 +376,30 @@ impl StratumClient {
 
         // Reconnect
         self.connect().await
+    }
+
+    /// Parse pool URL to extract host and port
+    /// Supports formats: "host:port", "http://host:port", "https://host:port"
+    fn parse_pool_url(url: &str) -> Result<(String, u16), String> {
+        // Remove protocol if present
+        let url = url
+            .strip_prefix("https://")
+            .or_else(|| url.strip_prefix("http://"))
+            .unwrap_or(url);
+        
+        // Split by colon to get host and port
+        match url.split_once(':') {
+            Some((host, port_str)) => {
+                // Parse port
+                match port_str.parse::<u16>() {
+                    Ok(port) => Ok((host.to_string(), port)),
+                    Err(_) => Err(format!("Invalid port: {}", port_str)),
+                }
+            }
+            None => {
+                // No port specified, use default Stratum port 3333
+                Ok((url.to_string(), 3333))
+            }
+        }
     }
 }

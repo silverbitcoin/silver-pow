@@ -342,17 +342,16 @@ mod tests {
 
     #[test]
     fn test_work_proof_creation() {
-        let proof = WorkProof::new(
+        let proof = WorkProof::builder(
             vec![1u8; 64],
-            0,
-            100,
-            12345,
             0,
             vec![2u8; 32],
             vec![0u8; 64],
-            1000,
             vec![3u8; 20],
-        );
+        )
+        .with_block_height(100)
+        .with_nonce(12345)
+        .build();
 
         assert!(proof.is_ok());
         let proof = proof.unwrap();
@@ -362,17 +361,14 @@ mod tests {
 
     #[test]
     fn test_work_proof_invalid_hash_length() {
-        let proof = WorkProof::new(
+        let proof = WorkProof::builder(
             vec![1u8; 64],
-            0,
-            100,
-            12345,
             0,
             vec![2u8; 32],
             vec![0u8; 32],
-            1000,
             vec![3u8; 20],
-        );
+        )
+        .build();
 
         assert!(proof.is_err());
     }
@@ -382,17 +378,16 @@ mod tests {
         let hash_result = vec![0u8; 64];
         let target = vec![255u8; 64];
 
-        let proof = WorkProof::new(
+        let proof = WorkProof::builder(
             vec![1u8; 64],
-            0,
-            100,
-            12345,
             0,
             vec![2u8; 32],
             hash_result,
-            1000,
             vec![3u8; 20],
         )
+        .with_block_height(100)
+        .with_nonce(12345)
+        .build()
         .unwrap();
 
         let result = proof.verify(&target);
@@ -405,17 +400,16 @@ mod tests {
         let hash_result = vec![255u8; 64];
         let target = vec![0u8; 64];
 
-        let proof = WorkProof::new(
+        let proof = WorkProof::builder(
             vec![1u8; 64],
-            0,
-            100,
-            12345,
             0,
             vec![2u8; 32],
             hash_result,
-            1000,
             vec![3u8; 20],
         )
+        .with_block_height(100)
+        .with_nonce(12345)
+        .build()
         .unwrap();
 
         let result = proof.verify(&target);

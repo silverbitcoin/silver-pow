@@ -23,8 +23,10 @@ pub struct StratumClient {
     pool_addr: String,
     /// Miner address (wallet)
     miner_address: String,
-    /// TCP connection to pool
-    connection: Arc<Mutex<Option<(tokio::net::tcp::OwnedReadHalf, tokio::net::tcp::OwnedWriteHalf)>>>,
+    /// TCP connection to pool (reader with buffer)
+    reader: Arc<Mutex<Option<BufReader<tokio::net::tcp::OwnedReadHalf>>>>,
+    /// TCP writer to pool
+    writer: Arc<Mutex<Option<tokio::net::tcp::OwnedWriteHalf>>>,
     /// Subscription ID from pool
     subscription_id: Arc<Mutex<Option<String>>>,
     /// Connection state
@@ -41,7 +43,8 @@ impl StratumClient {
         Self {
             pool_addr,
             miner_address,
-            connection: Arc::new(Mutex::new(None)),
+            reader: Arc::new(Mutex::new(None)),
+            writer: Arc::new(Mutex::new(None)),
             subscription_id: Arc::new(Mutex::new(None)),
             state: Arc::new(Mutex::new(ConnectionState::Disconnected)),
             request_id: Arc::new(Mutex::new(1)),
@@ -60,9 +63,16 @@ impl StratumClient {
         loop {
             match TcpStream::connect(&addr).await {
                 Ok(socket) => {
-                    let (reader, writer) = socket.into_split();
-                    let mut conn = self.connection.lock().await;
-                    *conn = Some((reader, writer));
+                    let (read_half, write_half) = socket.into_split();
+                    let buf_reader = BufReader::new(read_half);
+                    
+                    let mut reader = self.reader.lock().await;
+                    *reader = Some(buf_reader);
+                    drop(reader);
+                    
+                    let mut writer = self.writer.lock().await;
+                    *writer = Some(write_half);
+                    drop(writer);
                     
                     let mut state = self.state.lock().await;
                     *state = ConnectionState::Connected;
@@ -201,12 +211,13 @@ impl StratumClient {
         }
     }
 
-    /// Submit share to pool with full error handling
+    /// Submit share to pool with full error handling and block flag
     pub async fn submit_share(
         &self,
         job_id: &str,
         nonce: u64,
         hash: &str,
+        is_block: bool,
     ) -> Result<bool, String> {
         // Check if authorized
         let state = self.state.lock().await;
@@ -221,10 +232,11 @@ impl StratumClient {
         let request_id = self.get_next_request_id().await;
         let nonce_hex = format!("{:x}", nonce);
 
+        // REAL IMPLEMENTATION: Include is_block flag in request
         let request = json!({
             "id": request_id,
             "method": "mining.submit",
-            "params": [self.miner_address, job_id, nonce_hex, hash]
+            "params": [self.miner_address, job_id, nonce_hex, hash, is_block]
         });
 
         self.send_request(&request).await?;
@@ -250,7 +262,11 @@ impl StratumClient {
         // Check if share was accepted
         match response.get("result") {
             Some(Value::Bool(true)) => {
-                debug!("Share accepted: nonce={}, hash={}", nonce, hash);
+                if is_block {
+                    info!("✅ BLOCK SHARE ACCEPTED: nonce={}, hash={}", nonce, hash);
+                } else {
+                    debug!("Share accepted: nonce={}, hash={}", nonce, hash);
+                }
                 Ok(true)
             }
             Some(Value::Bool(false)) => {
@@ -279,12 +295,12 @@ impl StratumClient {
 
     /// Send request to pool with full error handling
     async fn send_request(&self, request: &Value) -> Result<(), String> {
-        let mut conn = self.connection.lock().await;
+        let mut writer = self.writer.lock().await;
         
-        match conn.as_mut() {
-            Some((_, writer)) => {
+        match writer.as_mut() {
+            Some(w) => {
                 let request_str = format!("{}\n", request);
-                match writer.write_all(request_str.as_bytes()).await {
+                match w.write_all(request_str.as_bytes()).await {
                     Ok(_) => {
                         if let Some(method) = request.get("method") {
                             debug!("Sent request: {}", method);
@@ -303,11 +319,10 @@ impl StratumClient {
 
     /// Read response from pool with full error handling
     async fn read_response(&self) -> Result<Value, String> {
-        let mut conn = self.connection.lock().await;
+        let mut reader = self.reader.lock().await;
         
-        match conn.as_mut() {
-            Some((reader, _)) => {
-                let mut buf_reader = BufReader::new(reader);
+        match reader.as_mut() {
+            Some(buf_reader) => {
                 let mut line = String::new();
 
                 match buf_reader.read_line(&mut line).await {
@@ -365,9 +380,13 @@ impl StratumClient {
     /// Reconnect to pool
     pub async fn reconnect(&self) -> Result<(), String> {
         // Close existing connection
-        let mut conn = self.connection.lock().await;
-        *conn = None;
-        drop(conn);
+        let mut reader = self.reader.lock().await;
+        *reader = None;
+        drop(reader);
+
+        let mut writer = self.writer.lock().await;
+        *writer = None;
+        drop(writer);
 
         // Reset state
         let mut state = self.state.lock().await;

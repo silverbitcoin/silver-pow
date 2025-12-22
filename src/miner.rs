@@ -105,7 +105,7 @@ impl Miner {
     }
 
     /// Mine a single work package using SHA-512
-    /// This is the real mining loop - no mocks or placeholders
+    /// This is the real mining loop 
     pub async fn mine_work(&self, work: WorkPackage) -> Result<Option<WorkProof>> {
         self.mine_work_with_address(work, vec![0u8; 20]).await
     }

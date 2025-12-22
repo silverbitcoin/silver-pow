@@ -112,6 +112,7 @@ pub struct MinerShare {
 }
 
 impl MinerShare {
+    /// Create MinerShare using builder pattern
     pub fn builder(
         miner_id: Vec<u8>,
         work_id: Vec<u8>,
@@ -134,7 +135,61 @@ impl MinerShare {
         }
     }
 
+    /// Create MinerShare with full validation
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        miner_id: Vec<u8>,
+        work_id: Vec<u8>,
+        nonce: u64,
+        extra_nonce: u64,
+        hash_result: Vec<u8>,
+        difficulty: u64,
+        is_block: bool,
+        chain_id: u32,
+        block_height: u64,
+    ) -> Result<Self> {
+        // Validate miner_id
+        if miner_id.is_empty() || miner_id.len() > 64 {
+            return Err(PoWError::PoolError(
+                format!("Invalid miner_id length: {}", miner_id.len()),
+            ));
+        }
 
+        // Validate hash_result
+        if hash_result.len() != 64 {
+            return Err(PoWError::PoolError(
+                format!("Invalid hash_result length: expected 64, got {}", hash_result.len()),
+            ));
+        }
+
+        // Validate difficulty
+        if difficulty == 0 {
+            return Err(PoWError::PoolError("Difficulty cannot be zero".to_string()));
+        }
+
+        // Validate nonce is not zero
+        if nonce == 0 && !is_block {
+            return Err(PoWError::PoolError("Nonce cannot be zero".to_string()));
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        Ok(MinerShare {
+            miner_id,
+            work_id,
+            nonce,
+            extra_nonce,
+            hash_result,
+            difficulty,
+            timestamp: now,
+            is_block,
+            chain_id,
+            block_height,
+        })
+    }
 }
 
 /// Miner account in the pool

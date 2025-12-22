@@ -162,7 +162,7 @@ impl DifficultyAdjustmentManager {
         // Clamp ratio to max adjustment (4x)
         let min_ratio = 1.0 / self.max_adjustment_ratio;
         let max_ratio = self.max_adjustment_ratio;
-        let clamped_ratio = adjustment_ratio.max(min_ratio).min(max_ratio);
+        let clamped_ratio = adjustment_ratio.clamp(min_ratio, max_ratio);
 
         // Calculate new difficulty
         let current_diff = *self.current_difficulty.read().await;

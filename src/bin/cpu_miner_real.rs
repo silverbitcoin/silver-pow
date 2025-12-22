@@ -267,17 +267,24 @@ async fn mining_loop(
                 thread_id, nonce, hash_hex
             );
 
-            // Submit to pool
-            let job_id = "0"; // Job ID from pool (simplified for now)
-            match stratum_client.submit_share(job_id, nonce, &hash_hex).await {
+            // Check if it's a block (meets block difficulty) BEFORE submitting
+            let is_block = hash_value <= block_target;
+            
+            if is_block {
+                stats.blocks_found.fetch_add(1, Ordering::Relaxed);
+                info!("🎉 BLOCK FOUND! Hash: {}", hash_hex);
+                info!("Block difficulty met: {} <= {}", hash_value, block_target);
+            }
+
+            // Submit to pool with is_block flag
+            // Generate unique job ID from hash and nonce for tracking
+            let job_id = format!("{:x}_{}", nonce, &hash_hex[0..16]);
+            match stratum_client.submit_share(&job_id, nonce, &hash_hex, is_block).await {
                 Ok(true) => {
                     stats.valid_shares.fetch_add(1, Ordering::Relaxed);
-
-                    // Check if it's a block (meets block difficulty)
-                    if hash_value <= block_target {
-                        stats.blocks_found.fetch_add(1, Ordering::Relaxed);
-                        info!("🎉 BLOCK FOUND! Hash: {}", hash_hex);
-                        info!("Block difficulty met: {} <= {}", hash_value, block_target);
+                    
+                    if is_block {
+                        info!("✅ Block accepted by pool!");
                     }
                 }
                 Ok(false) => {

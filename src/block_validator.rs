@@ -167,35 +167,49 @@ impl BlockValidator {
         Ok(true)
     }
 
-    /// Calculate target from difficulty
+    /// Calculate target from difficulty using real SHA-512 calculation
+    /// For SHA-512 (512-bit hashes):
+    /// difficulty = max_target / current_target
+    /// current_target = max_target / difficulty
+    /// max_target = 2^512 - 1 (all bits set)
     fn calculate_target_from_difficulty(&self, difficulty: u64) -> Result<Vec<u8>> {
         if difficulty == 0 {
             return Err(PoWError::InvalidDifficulty("Difficulty cannot be zero".to_string()));
         }
 
+        // For SHA-512, calculate target from difficulty
+        // The difficulty value represents how many times harder it is than difficulty 1
+        // difficulty 1 = target with 0 leading zero bytes (all 0xFF)
+        // difficulty 2 = target with ~1 leading zero byte
+        // difficulty 256 = target with ~1 leading zero byte (8 bits)
+        // difficulty 65536 = target with ~2 leading zero bytes (16 bits)
+        // difficulty 16777216 = target with ~3 leading zero bytes (24 bits)
+        // difficulty 4294967296 = target with ~4 leading zero bytes (32 bits)
+        
+        // Calculate leading zero BITS needed: log2(difficulty)
+        let log2_difficulty = (difficulty as f64).log2();
+        
+        // Convert bits to bytes: divide by 8 and round up
+        let leading_zero_bits = log2_difficulty as u32;
+        let leading_zero_bytes = (leading_zero_bits / 8) as usize;
+        let remaining_bits = leading_zero_bits % 8;
+        
+        // Build target: leading_zero_bytes of 0x00, then a partial byte if needed, then 0xFF for the rest
         let mut target = vec![0xFFu8; 64];
-
-        if difficulty > 1 {
-            let bits_to_shift = 64u32.saturating_sub(difficulty.ilog2());
-            let bytes_to_zero = (bits_to_shift / 8) as usize;
-
-            if bytes_to_zero < 64 {
-                for byte in target.iter_mut().skip(64 - bytes_to_zero).take(bytes_to_zero) {
-                    *byte = 0;
-                }
-
-                if bytes_to_zero > 0 && bytes_to_zero < 64 {
-                    let bit_shift = bits_to_shift % 8;
-                    if bit_shift > 0 {
-                        target[64 - bytes_to_zero - 1] >>= bit_shift;
-                    }
-                }
-            } else {
-                target = vec![0u8; 64];
-                target[0] = 1;
-            }
+        
+        // Set leading zero bytes
+        for i in 0..leading_zero_bytes.min(64) {
+            target[i] = 0x00;
         }
-
+        
+        // Set partial byte if there are remaining bits
+        if remaining_bits > 0 && leading_zero_bytes < 64 {
+            // Create a mask for the remaining bits
+            // If we need 3 more zero bits, mask = 0b00011111 = 0x1F
+            let mask = (1u8 << (8 - remaining_bits)) - 1;
+            target[leading_zero_bytes] = mask;
+        }
+        
         Ok(target)
     }
 

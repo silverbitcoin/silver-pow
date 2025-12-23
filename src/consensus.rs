@@ -330,7 +330,7 @@ mod tests {
         consensus.initialize_chain(0).await.unwrap();
 
         let work = consensus
-            .create_work_package(0, vec![1u8; 32], vec![2u8; 32], vec![3u8; 32])
+            .create_work_package(0, vec![1u8; 64], vec![2u8; 64], vec![3u8; 64])
             .await;
 
         assert!(work.is_ok());

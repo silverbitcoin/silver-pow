@@ -23,7 +23,7 @@ pub mod reward_distribution;
 pub mod difficulty_adjustment;
 pub mod transaction_engine;
 
-pub use difficulty::{DifficultyAdjustment, DifficultyCalculator};
+pub use difficulty::{DifficultyAdjustment, DifficultyCalculator, calculate_difficulty_bits, bits_to_difficulty};
 pub use miner::{Miner, MinerConfig, MinerStats};
 pub use mining_pool::{MiningPool, PoolConfig, PoolStats, PoolDetailedStats, MinerShare, MinerAccount};
 pub use rewards::{BlockReward, RewardCalculator};
@@ -67,7 +67,7 @@ pub enum PoWError {
     IoError(#[from] std::io::Error),
 
     #[error("Serialization error: {0}")]
-    SerializationError(#[from] bincode::Error),
+    SerializationError(String),
 
     #[error("Internal error: {0}")]
     Internal(String),

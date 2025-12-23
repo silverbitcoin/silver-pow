@@ -159,6 +159,7 @@ async fn run_node(
         hashrate: 0.0,
         mining_enabled: false,
         mining_address: String::new(), // Will be set via RPC
+        balances: Arc::new(RwLock::new(std::collections::HashMap::new())),
     }));
 
     // Initialize P2P networking

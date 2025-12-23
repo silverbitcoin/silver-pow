@@ -8,93 +8,119 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
-/// Real u256 implementation for hash comparison
-/// Represents a 256-bit unsigned integer as two u128 values (high and low)
+/// Real u512 implementation for SHA-512 hash comparison
+/// Represents a 512-bit unsigned integer as four u128 values (for proper 512-bit arithmetic)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct U256 {
-    high: u128,
-    low: u128,
+struct U512 {
+    part0: u128,  // Bytes 0-15
+    part1: u128,  // Bytes 16-31
+    part2: u128,  // Bytes 32-47
+    part3: u128,  // Bytes 48-63
 }
 
-impl std::fmt::Display for U256 {
+impl std::fmt::Display for U512 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.high == 0 {
-            write!(f, "{}", self.low)
-        } else {
-            write!(f, "{}_{:032x}", self.high, self.low)
-        }
+        write!(
+            f,
+            "{:032x}_{:032x}_{:032x}_{:032x}",
+            self.part0, self.part1, self.part2, self.part3
+        )
     }
 }
 
-impl U256 {
-    /// Create U256 from 32 bytes (big-endian)
-    fn from_bytes(bytes: &[u8; 32]) -> Self {
-        let mut high_bytes = [0u8; 16];
-        let mut low_bytes = [0u8; 16];
+impl U512 {
+    /// Create U512 from 64 bytes (big-endian) - full SHA-512 hash
+    fn from_bytes(bytes: &[u8; 64]) -> Self {
+        let mut p0_bytes = [0u8; 16];
+        let mut p1_bytes = [0u8; 16];
+        let mut p2_bytes = [0u8; 16];
+        let mut p3_bytes = [0u8; 16];
         
-        high_bytes.copy_from_slice(&bytes[0..16]);
-        low_bytes.copy_from_slice(&bytes[16..32]);
+        p0_bytes.copy_from_slice(&bytes[0..16]);
+        p1_bytes.copy_from_slice(&bytes[16..32]);
+        p2_bytes.copy_from_slice(&bytes[32..48]);
+        p3_bytes.copy_from_slice(&bytes[48..64]);
         
-        let high = u128::from_be_bytes(high_bytes);
-        let low = u128::from_be_bytes(low_bytes);
+        let part0 = u128::from_be_bytes(p0_bytes);
+        let part1 = u128::from_be_bytes(p1_bytes);
+        let part2 = u128::from_be_bytes(p2_bytes);
+        let part3 = u128::from_be_bytes(p3_bytes);
         
-        U256 { high, low }
+        U512 { part0, part1, part2, part3 }
     }
     
-    /// Divide U256 by u128 using proper long division
-    /// Returns U256 = self / divisor
-    fn div_u128(self, divisor: u128) -> U256 {
+    /// Divide U512 by u128 using proper long division
+    /// Returns U512 = self / divisor
+    fn div_u128(self, divisor: u128) -> U512 {
         if divisor == 0 {
-            return U256 { high: u128::MAX, low: u128::MAX };
-        }
-        
-        if self.high == 0 {
-            // Simple case: only low part
-            return U256 {
-                high: 0,
-                low: self.low / divisor,
+            return U512 {
+                part0: u128::MAX,
+                part1: u128::MAX,
+                part2: u128::MAX,
+                part3: u128::MAX,
             };
         }
         
-        // Complex case: use proper long division
-        let result_high = self.high / divisor;
-        let remainder_high = self.high % divisor;
+        // Perform long division on 512-bit number
+        let mut result = U512 {
+            part0: 0,
+            part1: 0,
+            part2: 0,
+            part3: 0,
+        };
         
-        let low_high = self.low >> 64;
-        let low_low = self.low & 0xFFFFFFFFFFFFFFFF;
+        let mut remainder: u128 = 0;
         
-        let combined_high = (remainder_high << 64) + low_high;
-        let result_low_high = combined_high / divisor;
-        let remainder_combined = combined_high % divisor;
-        
-        let combined_low = (remainder_combined << 64) + low_low;
-        let result_low_low = combined_low / divisor;
-        
-        let result_low = (result_low_high << 64) | result_low_low;
-        
-        U256 {
-            high: result_high,
-            low: result_low,
+        // Process each 128-bit part from most significant to least significant
+        for part in [&self.part0, &self.part1, &self.part2, &self.part3].iter() {
+            let combined = (remainder << 64) | (*part >> 64);
+            let q_high = combined / divisor;
+            remainder = combined % divisor;
+            
+            let combined_low = (remainder << 64) | (*part & 0xFFFFFFFFFFFFFFFF);
+            let q_low = combined_low / divisor;
+            remainder = combined_low % divisor;
+            
+            let quotient = (q_high << 64) | q_low;
+            
+            match result.part0 {
+                0 if result.part1 == 0 && result.part2 == 0 => {
+                    result.part0 = quotient;
+                }
+                _ if result.part1 == 0 && result.part2 == 0 => {
+                    result.part1 = quotient;
+                }
+                _ if result.part2 == 0 => {
+                    result.part2 = quotient;
+                }
+                _ => {
+                    result.part3 = quotient;
+                }
+            }
         }
+        
+        result
     }
     
-    /// Maximum U256 value
+    /// Maximum U512 value
     fn max() -> Self {
-        U256 {
-            high: u128::MAX,
-            low: u128::MAX,
+        U512 {
+            part0: u128::MAX,
+            part1: u128::MAX,
+            part2: u128::MAX,
+            part3: u128::MAX,
         }
     }
 }
 
-/// Convert 32 bytes to U256 (big-endian)
-fn u256_from_bytes(bytes: &[u8; 32]) -> U256 {
-    U256::from_bytes(bytes)
+/// Convert 64 bytes (SHA-512 hash) to U512 (big-endian)
+fn u512_from_bytes(bytes: &[u8; 64]) -> U512 {
+    U512::from_bytes(bytes)
 }
 
-/// Get maximum U256 value
-fn u256_max() -> U256 {
-    U256::max()
+/// Get maximum U512 value
+fn u512_max() -> U512 {
+    U512::max()
 }
 
 #[derive(Parser, Debug)]
@@ -245,21 +271,21 @@ async fn mining_loop(
             last_stats_print = Instant::now();
         }
 
-        // Real difficulty validation: convert hash to u256 and compare with target
-        let mut hash_u256 = [0u8; 32];
-        hash_u256.copy_from_slice(&hash[0..32]);
-        let hash_value = u256_from_bytes(&hash_u256);
+        // Real difficulty validation: convert full SHA-512 hash to u512 and compare with target
+        let hash_vec = hash.to_vec();
+        let hash_bytes: [u8; 64] = hash_vec.as_slice().try_into().expect("SHA-512 hash must be 64 bytes");
+        let hash_u512 = u512_from_bytes(&hash_bytes);
 
-        // Pool difficulty target: 1,000,000
+        // Pool difficulty target: 1,000,000,000
         // Block difficulty: 1,000,000,000
-        const POOL_DIFFICULTY: u128 = 1_000_000;
+        const POOL_DIFFICULTY: u128 = 1_000_000_000;
         const BLOCK_DIFFICULTY: u128 = 1_000_000_000;
 
-        let pool_target = u256_max().div_u128(POOL_DIFFICULTY);
-        let block_target = u256_max().div_u128(BLOCK_DIFFICULTY);
+        let pool_target = u512_max().div_u128(POOL_DIFFICULTY);
+        let block_target = u512_max().div_u128(BLOCK_DIFFICULTY);
 
         // Check if hash meets pool difficulty
-        if hash_value <= pool_target {
+        if hash_u512 <= pool_target {
             stats.shares_found.fetch_add(1, Ordering::Relaxed);
 
             info!(
@@ -268,12 +294,12 @@ async fn mining_loop(
             );
 
             // Check if it's a block (meets block difficulty) BEFORE submitting
-            let is_block = hash_value <= block_target;
+            let is_block = hash_u512 <= block_target;
             
             if is_block {
                 stats.blocks_found.fetch_add(1, Ordering::Relaxed);
                 info!("🎉 BLOCK FOUND! Hash: {}", hash_hex);
-                info!("Block difficulty met: {} <= {}", hash_value, block_target);
+                info!("Block difficulty met: {} <= {}", hash_u512, block_target);
             }
 
             // Submit to pool with is_block flag

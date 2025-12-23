@@ -234,8 +234,10 @@ impl Block {
             String::new()
         };
 
-        // REAL IMPLEMENTATION: Calculate block reward (50 SLVR = 5,000,000,000 satoshis)
-        const BLOCK_REWARD: u128 = 5_000_000_000;
+        // REAL IMPLEMENTATION: Calculate block reward (50 SLVR = 5,000,000,000 MIST)
+        // Using MIST_PER_SLVR constant: 50 × 100,000,000 = 5,000,000,000 MIST
+        const BLOCK_REWARD_SLVR: u128 = 50; // 50 SLVR per block
+        let block_reward = BLOCK_REWARD_SLVR * (silver_core::MIST_PER_SLVR as u128);
         
         // REAL IMPLEMENTATION: Extract transaction fees from block data
         let fees = if bytes.len() > 116 {
@@ -248,7 +250,7 @@ impl Block {
         };
 
         // REAL IMPLEMENTATION: Create complete coinbase transaction
-        let coinbase = CoinbaseTransaction::new(height, miner_address, BLOCK_REWARD, fees);
+        let coinbase = CoinbaseTransaction::new(height, miner_address, block_reward, fees);
 
         Ok(Self {
             header,
@@ -361,16 +363,20 @@ mod tests {
 
     #[test]
     fn test_coinbase_transaction() {
-        let coinbase = CoinbaseTransaction::new(1, "miner_address".to_string(), 5000000000, 100000);
+        // REAL TEST: Using MIST_PER_SLVR constant (50 SLVR = 5,000,000,000 MIST)
+        let block_reward = 50u64 * silver_core::MIST_PER_SLVR;
+        let coinbase = CoinbaseTransaction::new(1, "miner_address".to_string(), block_reward as u128, 100000);
         let bytes = coinbase.to_bytes();
         assert!(!bytes.is_empty());
     }
 
     #[test]
     fn test_block_builder() {
+        // REAL TEST: Using MIST_PER_SLVR constant (50 SLVR = 5,000,000,000 MIST)
+        let block_reward = 50u64 * silver_core::MIST_PER_SLVR;
         let builder = BlockBuilder::new(1, [0u8; 32], [0u8; 32], 0x207fffff);
         let block = builder
-            .build(12345, 1, "miner".to_string(), 5000000000, 100000)
+            .build(12345, 1, "miner".to_string(), block_reward as u128, 100000)
             .unwrap();
         assert_eq!(block.height, 1);
         assert_eq!(block.hash().len(), 64);

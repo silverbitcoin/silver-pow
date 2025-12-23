@@ -1,69 +1,63 @@
 [package]
 name = "silver-pow"
 version = "2.5.3"
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
-repository.workspace = true
+edition = "2021"
+rust-version = "1.90"
+authors = ["SilverBitcoin Team <team@silverbitcoin.org>"]
+license = "Apache-2.0"
+repository = "https://github.com/silverbitcoin/silverbitcoin"
+homepage = "https://silverbitcoin.org"
 keywords = ["pow", "mining", "consensus", "blockchain"]
 categories = ["cryptography", "network-programming"]
+description = "Proof-of-Work consensus engine for SilverBitcoin 512-bit blockchain"
 
 [dependencies]
 silver-core = { path = "../silver-core" }
 silver-crypto = { path = "../silver-crypto" }
-silver-sharding = { path = "../silver-sharding" }
 silver-storage = { path = "../silver-storage" }
 
-tokio = { workspace = true }
-tokio-util = { workspace = true }
-futures = { workspace = true }
-async-trait = { workspace = true }
+tokio = { version = "1.48", features = ["full", "tracing"] }
+tokio-util = { version = "0.7", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
 
-serde = { workspace = true }
-serde_json = { workspace = true }
-bincode = { workspace = true }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
 
-blake3 = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
+bs58 = "0.5"
 
-tracing = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
+tracing = "0.1"
+thiserror = "1.0"
+anyhow = "1.0"
 
-parking_lot = { workspace = true }
-dashmap = { workspace = true }
-crossbeam = { workspace = true }
-rayon = { workspace = true }
+parking_lot = "0.12"
+dashmap = "5.5"
+crossbeam = "0.8"
+rayon = "1.8"
 
-bytes = { workspace = true }
-chrono = { workspace = true }
-uuid = { version = "1.0", features = ["v4", "serde"] }
+bytes = "1.5"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.10", features = ["v4", "serde"] }
 
-# HTTP client for RPC and Stratum
-reqwest = { version = "0.11", features = ["json"] }
-clap = { version = "4.4", features = ["derive"] }
-tracing-subscriber = { version = "0.3", features = ["fmt"] }
+# HTTP client for RPC
+reqwest = { version = "0.12", features = ["json"] }
 
 # HTTP/RPC Server
-axum = { workspace = true }
-tower = { workspace = true }
-tower-http = { workspace = true }
-hyper = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }
-proptest = { workspace = true }
-criterion = { workspace = true }
+axum = { version = "0.8", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-full"] }
+hyper = "1.4"
 
 # Mining dependencies
-reqwest = { version = "0.11", features = ["json"] }
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 
-[[bench]]
-name = "pow_benchmarks"
-harness = false
+[dev-dependencies]
+tempfile = "3.8"
+proptest = "1.4"
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 
 [[bin]]
 name = "cpu_miner_real"
@@ -76,3 +70,7 @@ path = "src/stratum_pool.rs"
 [[bin]]
 name = "silverbitcoin-node"
 path = "src/bin/node.rs"
+
+[[bin]]
+name = "silverbitcoin-node-production"
+path = "src/bin/node_production.rs"

@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
+#[allow(unused_imports)]
+use silver_core::MIST_PER_SLVR;
 
 /// Miner reward account
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -332,37 +334,40 @@ mod tests {
         let mut account = MinerRewardAccount::new("miner1".to_string());
         assert_eq!(account.balance(), 0);
 
-        account.add_reward(5000000000);
-        assert_eq!(account.total_rewards, 5000000000);
-        assert_eq!(account.pending_rewards, 5000000000);
-        assert_eq!(account.balance(), 5000000000);
+        let block_reward = 50 * MIST_PER_SLVR; // 50 SLVR = 5,000,000,000 MIST
+        account.add_reward(block_reward as u128);
+        assert_eq!(account.total_rewards, block_reward as u128);
+        assert_eq!(account.pending_rewards, block_reward as u128);
+        assert_eq!(account.balance(), block_reward as u128);
 
-        account.mark_paid(2500000000).unwrap();
-        assert_eq!(account.pending_rewards, 2500000000);
-        assert_eq!(account.paid_rewards, 2500000000);
-        assert_eq!(account.balance(), 2500000000);
+        account.mark_paid((block_reward / 2) as u128).unwrap();
+        assert_eq!(account.pending_rewards, (block_reward / 2) as u128);
+        assert_eq!(account.paid_rewards, (block_reward / 2) as u128);
+        assert_eq!(account.balance(), (block_reward / 2) as u128);
     }
 
     #[test]
     fn test_block_reward_calculation() {
-        let manager = RewardDistributionManager::new(210000, 5000000000);
+        let block_reward = 50 * MIST_PER_SLVR; // 50 SLVR = 5,000,000,000 MIST
+        let manager = RewardDistributionManager::new(210000, block_reward as u128);
 
         // First block
-        assert_eq!(manager.calculate_block_reward(0), 5000000000);
+        assert_eq!(manager.calculate_block_reward(0), block_reward as u128);
 
         // Before halving
-        assert_eq!(manager.calculate_block_reward(209999), 5000000000);
+        assert_eq!(manager.calculate_block_reward(209999), block_reward as u128);
 
         // After first halving
-        assert_eq!(manager.calculate_block_reward(210000), 2500000000);
+        assert_eq!(manager.calculate_block_reward(210000), (block_reward / 2) as u128);
 
         // After second halving
-        assert_eq!(manager.calculate_block_reward(420000), 1250000000);
+        assert_eq!(manager.calculate_block_reward(420000), (block_reward / 4) as u128);
     }
 
     #[test]
     fn test_halving_detection() {
-        let manager = RewardDistributionManager::new(210000, 5000000000);
+        let block_reward = 50 * MIST_PER_SLVR; // 50 SLVR = 5,000,000,000 MIST
+        let manager = RewardDistributionManager::new(210000, block_reward as u128);
 
         assert!(!manager.is_halving_block(0));
         assert!(!manager.is_halving_block(209999));
@@ -372,24 +377,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_reward_distribution() {
-        let manager = RewardDistributionManager::new(210000, 5000000000);
+        let block_reward = 50 * MIST_PER_SLVR; // 50 SLVR = 5,000,000,000 MIST
+        let manager = RewardDistributionManager::new(210000, block_reward as u128);
 
         let record = manager
             .record_block_reward(1, "hash1".to_string(), "miner1".to_string(), 100000)
             .await
             .unwrap();
 
-        assert_eq!(record.base_reward, 5000000000);
+        assert_eq!(record.base_reward, block_reward as u128);
         assert_eq!(record.transaction_fees, 100000);
-        assert_eq!(record.total_reward, 5000000100);
+        assert_eq!(record.total_reward, (block_reward as u128) + 100000);
 
         let balance = manager.get_miner_balance("miner1").await;
-        assert_eq!(balance, 5000000100);
+        assert_eq!(balance, (block_reward as u128) + 100000);
     }
 
     #[tokio::test]
     async fn test_payout_processing() {
-        let manager = RewardDistributionManager::new(210000, 5000000000);
+        let block_reward = 50 * MIST_PER_SLVR; // 50 SLVR = 5,000,000,000 MIST
+        let manager = RewardDistributionManager::new(210000, block_reward as u128);
 
         manager
             .record_block_reward(1, "hash1".to_string(), "miner1".to_string(), 0)
@@ -397,14 +404,14 @@ mod tests {
             .unwrap();
 
         let balance_before = manager.get_miner_balance("miner1").await;
-        assert_eq!(balance_before, 5000000000);
+        assert_eq!(balance_before, block_reward as u128);
 
         manager
-            .process_payout("miner1", 2500000000)
+            .process_payout("miner1", (block_reward / 2) as u128)
             .await
             .unwrap();
 
         let balance_after = manager.get_miner_balance("miner1").await;
-        assert_eq!(balance_after, 2500000000);
+        assert_eq!(balance_after, (block_reward / 2) as u128);
     }
 }

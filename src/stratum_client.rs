@@ -35,6 +35,10 @@ pub struct StratumClient {
     request_id: Arc<Mutex<u64>>,
     /// Max reconnection attempts
     max_reconnect_attempts: u32,
+    /// Last keepalive time
+    last_keepalive: Arc<Mutex<std::time::Instant>>,
+    /// Current work block height (for job_id generation)
+    current_block_height: Arc<Mutex<u64>>,
 }
 
 impl StratumClient {
@@ -49,6 +53,8 @@ impl StratumClient {
             state: Arc::new(Mutex::new(ConnectionState::Disconnected)),
             request_id: Arc::new(Mutex::new(1)),
             max_reconnect_attempts: 5,
+            last_keepalive: Arc::new(Mutex::new(std::time::Instant::now())),
+            current_block_height: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -302,10 +308,20 @@ impl StratumClient {
                 let request_str = format!("{}\n", request);
                 match w.write_all(request_str.as_bytes()).await {
                     Ok(_) => {
-                        if let Some(method) = request.get("method") {
-                            debug!("Sent request: {}", method);
+                        // CRITICAL FIX: Flush immediately after write to ensure data is sent
+                        // Without flush, TCP buffer may not send data, causing pool timeout
+                        match w.flush().await {
+                            Ok(_) => {
+                                if let Some(method) = request.get("method") {
+                                    debug!("Sent request: {}", method);
+                                }
+                                Ok(())
+                            }
+                            Err(e) => {
+                                error!("Failed to flush request: {}", e);
+                                Err(format!("Failed to flush request: {}", e))
+                            }
                         }
-                        Ok(())
                     }
                     Err(e) => {
                         error!("Failed to send request: {}", e);
@@ -317,7 +333,8 @@ impl StratumClient {
         }
     }
 
-    /// Read response from pool with full error handling
+    /// Read and process response from pool with full error handling
+    /// Handles both RPC responses and server notifications (mining.notify, mining.set_difficulty)
     async fn read_response(&self) -> Result<Value, String> {
         let mut reader = self.reader.lock().await;
         
@@ -420,5 +437,107 @@ impl StratumClient {
                 Ok((url.to_string(), 3333))
             }
         }
+    }
+
+    /// Send keepalive ping to maintain connection
+    /// Stratum protocol uses mining.ping/pong to detect stale connections
+    pub async fn send_keepalive(&self) -> Result<(), String> {
+        let last_ka = self.last_keepalive.lock().await;
+        
+        // Only send keepalive every 30 seconds to avoid flooding
+        if last_ka.elapsed() < std::time::Duration::from_secs(30) {
+            return Ok(());
+        }
+        
+        drop(last_ka);
+
+        // Check if authorized first
+        let state = self.state.lock().await;
+        if *state != ConnectionState::Authorized {
+            return Ok(()); // Skip keepalive if not authorized
+        }
+        drop(state);
+
+        let request_id = self.get_next_request_id().await;
+        let request = json!({
+            "id": request_id,
+            "method": "mining.ping",
+            "params": []
+        });
+
+        match self.send_request(&request).await {
+            Ok(_) => {
+                let mut last_ka = self.last_keepalive.lock().await;
+                *last_ka = std::time::Instant::now();
+                debug!("Keepalive ping sent");
+                Ok(())
+            }
+            Err(e) => {
+                warn!("Failed to send keepalive: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    /// Update current block height (called when receiving work from pool)
+    pub async fn update_block_height(&self, height: u64) {
+        let mut h = self.current_block_height.lock().await;
+        *h = height;
+    }
+
+    /// Get current block height for job_id generation
+    pub async fn get_block_height(&self) -> u64 {
+        let h = self.current_block_height.lock().await;
+        *h
+    }
+
+    /// Process mining.notify from pool to extract block height
+    /// mining.notify params: [job_id, prev_hash, coinbase1, coinbase2, merkle_branches, version, bits, time, clean_jobs]
+    /// For SilverBitcoin, we extract height from job_id or bits
+    pub async fn process_work_notification(&self, params: &[Value]) -> Result<(), String> {
+        if params.len() < 9 {
+            return Err("Invalid mining.notify params length".to_string());
+        }
+
+        // Extract job_id (first param)
+        let job_id = match params.get(0) {
+            Some(Value::String(id)) => id.clone(),
+            _ => return Err("Invalid job_id in mining.notify".to_string()),
+        };
+
+        // Extract bits (7th param) - contains difficulty information
+        let _bits_str = match params.get(6) {
+            Some(Value::String(b)) => b.clone(),
+            _ => return Err("Invalid bits in mining.notify".to_string()),
+        };
+
+        // Extract time (8th param) - block timestamp
+        let _time_str = match params.get(7) {
+            Some(Value::String(t)) => t.clone(),
+            _ => return Err("Invalid time in mining.notify".to_string()),
+        };
+
+        // REAL IMPLEMENTATION: Parse job_id to extract block height
+        // Job ID format from pool: "height_timestamp_nonce" or similar
+        // Try to extract height from job_id
+        let height = job_id
+            .split('_')
+            .next()
+            .and_then(|h| u64::from_str_radix(h, 16).ok())
+            .unwrap_or_else(|| {
+                // Fallback: try to parse as decimal
+                job_id
+                    .split('_')
+                    .next()
+                    .and_then(|h| h.parse::<u64>().ok())
+                    .unwrap_or(0)
+            });
+
+        if height > 0 {
+            self.update_block_height(height).await;
+            debug!("Updated block height from mining.notify: {}", height);
+        }
+
+        Ok(())
     }
 }

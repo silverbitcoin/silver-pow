@@ -39,16 +39,16 @@ impl WorkPackage {
             return Err(PoWError::InvalidDifficulty("Invalid chain ID".to_string()));
         }
 
-        if block_hash.len() != 32 {
-            return Err(PoWError::InvalidDifficulty("Block hash must be 32 bytes".to_string()));
+        if block_hash.len() != 64 {
+            return Err(PoWError::InvalidDifficulty("Block hash must be 64 bytes (SHA-512)".to_string()));
         }
 
-        if parent_hash.len() != 32 {
-            return Err(PoWError::InvalidDifficulty("Parent hash must be 32 bytes".to_string()));
+        if parent_hash.len() != 64 {
+            return Err(PoWError::InvalidDifficulty("Parent hash must be 64 bytes (SHA-512)".to_string()));
         }
 
-        if merkle_root.len() != 32 {
-            return Err(PoWError::InvalidDifficulty("Merkle root must be 32 bytes".to_string()));
+        if merkle_root.len() != 64 {
+            return Err(PoWError::InvalidDifficulty("Merkle root must be 64 bytes (SHA-512)".to_string()));
         }
 
         // Calculate target from difficulty using proper big integer arithmetic
@@ -258,9 +258,9 @@ mod tests {
         let work = WorkPackage::new(
             0,
             100,
-            vec![1u8; 32],
-            vec![2u8; 32],
-            vec![3u8; 32],
+            vec![1u8; 64],
+            vec![2u8; 64],
+            vec![3u8; 64],
             1000,
             1_000_000,
         );
@@ -305,12 +305,13 @@ mod tests {
 
     #[test]
     fn test_work_package_invalid_hash_length() {
+        // REAL: SHA-512 produces 64 bytes, not 32
         let work = WorkPackage::new(
             0,
             100,
-            vec![1u8; 31],
-            vec![2u8; 32],
-            vec![3u8; 32],
+            vec![1u8; 63],  // Invalid: 63 bytes instead of 64
+            vec![2u8; 64],
+            vec![3u8; 64],
             1000,
             1_000_000,
         );

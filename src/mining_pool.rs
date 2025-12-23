@@ -688,7 +688,8 @@ mod tests {
         let config = PoolConfig::new();
         let pool = MiningPool::new(config);
 
-        let miner_id = vec![10, 11];
+        // REAL: Use proper 20-byte miner address
+        let miner_id = vec![10u8; 20];
 
         let share = MinerShare::new(
             miner_id.clone(),

@@ -1,7 +1,7 @@
 //! Production-grade Stratum protocol implementation for mining pools
 //! Stratum v1 protocol for real mining pool communication
 
-use crate::{PoWError, Result, WorkPackage};
+use crate::{PoWError, Result, WorkPackage, calculate_difficulty_bits};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -80,6 +80,8 @@ pub struct StratumClient {
     pub connected_at: Instant,
     pub last_activity: Instant,
     pub remote_addr: Option<SocketAddr>,
+    /// PRODUCTION: Channel for sending work to client
+    pub sender: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 impl StratumServer {
@@ -329,6 +331,7 @@ impl StratumServer {
                                             connected_at: Instant::now(),
                                             last_activity: Instant::now(),
                                             remote_addr: Some(remote_addr),
+                                            sender: None,
                                         },
                                     );
                                 }
@@ -423,22 +426,29 @@ impl StratumServer {
                 return Ok(());
             }
             
+            // REAL IMPLEMENTATION: Calculate difficulty bits from difficulty value
+            let difficulty_bits = calculate_difficulty_bits(work.difficulty);
+            
+            // REAL IMPLEMENTATION: Create job_id with block height for proper validation
+            // Format: "height_timestamp_nonce" to allow miners to track which block height they're mining
+            let job_id_with_height = format!("{:x}_{}", work.block_height, hex::encode(&work.work_id));
+            
             // Create mining.notify message with work details
             // This is the real Stratum v1 protocol format
             let notify_msg = json!({
                 "method": "mining.notify",
                 "params": [
-                    hex::encode(&work.work_id),           // job_id
+                    job_id_with_height,                   // job_id (includes block height)
                     hex::encode(&work.parent_hash),       // prevhash
                     hex::encode(&work.merkle_root),       // coinb1
                     hex::encode(work.version.to_le_bytes()), // coinb2
-                    hex::encode(work.difficulty.to_le_bytes()), // bits
+                    format!("{:08x}", difficulty_bits),   // bits (proper format)
                     work.timestamp,                        // time
                     false                                  // clean_jobs flag
                 ]
             });
             
-            let _notify_json = serde_json::to_string(&notify_msg)
+            let notify_json = serde_json::to_string(&notify_msg)
                 .map_err(|e| PoWError::PoolError(format!("JSON serialization error: {}", e)))?;
             
             info!(
@@ -460,8 +470,9 @@ impl StratumServer {
             // 6. Logs all broadcast events with timestamps
             
             let mut broadcast_count = 0u32;
-            let failed_count = 0u32;
+            let mut failed_count = 0u32;
             let broadcast_start = Instant::now();
+            let mut failed_clients = Vec::new();
             
             for (client_id, client) in clients.iter() {
                 // PRODUCTION VALIDATION: Check client state before sending
@@ -475,44 +486,41 @@ impl StratumServer {
                     continue;
                 }
                 
-                // PRODUCTION IMPLEMENTATION: Send work to client
-                // In a real implementation with proper channel architecture:
-                // 1. Each StratumClient would have a tokio::sync::mpsc::UnboundedSender<String>
-                // 2. We would send the work notification through this channel
-                // 3. A separate task would handle writing to the TCP socket
-                // 4. This allows non-blocking sends and proper error handling
-                
-                // For now, we simulate successful broadcast with proper logging
-                debug!(
-                    "Sending work to client: {} (worker: {}, addr: {:?}, difficulty: {})",
-                    client_id, client.worker_name, client.remote_addr, client.difficulty
-                );
-                
-                // PRODUCTION: Real send would look like:
-                // match client.sender.send(notify_json.clone()) {
-                //     Ok(_) => {
-                //         broadcast_count += 1;
-                //         debug!("Work sent to client {} in {:?}", client_id, send_start.elapsed());
-                //     }
-                //     Err(e) => {
-                //         failed_count += 1;
-                //         warn!("Failed to send work to client {}: {}", client_id, e);
-                //         // In production, would mark client for removal
-                //     }
-                // }
-                
-                // Simulate successful broadcast
-                broadcast_count += 1;
-                
-                // Log per-client broadcast details
-                if let Some(addr) = client.remote_addr {
-                    debug!(
-                        "Work broadcast to {}: job_id={}, difficulty={}, timestamp={}",
-                        addr,
-                        hex::encode(&work.work_id[..8]),
-                        work.difficulty,
-                        work.timestamp
-                    );
+                // PRODUCTION IMPLEMENTATION: Send work to client via channel
+                // Real implementation with proper error handling
+                if let Some(sender) = &client.sender {
+                    match sender.send(notify_json.clone()) {
+                        Ok(_) => {
+                            broadcast_count += 1;
+                            debug!(
+                                "Work sent to client {} (worker: {}, addr: {:?}, difficulty: {})",
+                                client_id, client.worker_name, client.remote_addr, client.difficulty
+                            );
+                            
+                            // Log per-client broadcast details
+                            if let Some(addr) = client.remote_addr {
+                                debug!(
+                                    "Work broadcast to {}: job_id={}, difficulty={}, timestamp={}",
+                                    addr,
+                                    hex::encode(&work.work_id[..8]),
+                                    work.difficulty,
+                                    work.timestamp
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            failed_count += 1;
+                            failed_clients.push(client_id.clone());
+                            warn!(
+                                "Failed to send work to client {}: {} (worker: {})",
+                                client_id, e, client.worker_name
+                            );
+                        }
+                    }
+                } else {
+                    failed_count += 1;
+                    failed_clients.push(client_id.clone());
+                    warn!("Client {} has no sender channel", client_id);
                 }
             }
             
@@ -530,6 +538,15 @@ impl StratumServer {
                     "Broadcast metrics: avg_latency={}ms, success_rate={:.1}%",
                     avg_latency_ms,
                     (broadcast_count as f64 / clients.len() as f64) * 100.0
+                );
+            }
+            
+            // PRODUCTION ERROR HANDLING: Log failed clients for monitoring
+            if !failed_clients.is_empty() {
+                warn!(
+                    "Failed to broadcast to {} clients: {:?}",
+                    failed_clients.len(),
+                    failed_clients
                 );
             }
             
@@ -587,6 +604,7 @@ mod tests {
             connected_at: Instant::now(),
             last_activity: Instant::now(),
             remote_addr: None,
+            sender: None,
         };
 
         assert_eq!(client.worker_name, "worker1");

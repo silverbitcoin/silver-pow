@@ -254,3 +254,168 @@ mod tests {
         assert_eq!(diff_at_2x_halving, base_diff * 4);
     }
 }
+
+
+/// REAL IMPLEMENTATION: Calculate difficulty bits from difficulty value
+/// Difficulty bits format: 0xEEMMMMMM where EE is exponent (1 byte) and MMMMMM is mantissa (3 bytes)
+/// Exponent must be between 3-30
+/// This converts a difficulty value to the compact bits representation used in blockchain
+/// 
+/// Algorithm:
+/// 1. Convert difficulty to target using: target = 2^256 / difficulty (for SHA-256 compatibility)
+/// 2. Encode target as compact bits: find mantissa (3 bytes) and exponent (1 byte)
+/// 3. Formula: bits = (exponent << 24) | mantissa
+/// 4. Decode: target = mantissa * 2^(8*(exponent-3))
+pub fn calculate_difficulty_bits(difficulty: u64) -> u32 {
+    if difficulty == 0 {
+        return 0;
+    }
+    
+    // Maximum target for SHA-512 (all bits set)
+    // For blockchain compatibility, we use the standard 0x1d00ffff
+    // which represents difficulty 1
+    const MAX_TARGET_BITS: u32 = 0x1d00ffff; // Bitcoin's difficulty 1 target
+    
+    // For difficulty 1, return the standard max target bits
+    if difficulty == 1 {
+        return MAX_TARGET_BITS;
+    }
+    
+    // Decode max target bits to get reference values
+    let max_exponent = (MAX_TARGET_BITS >> 24) as u8 as u32;
+    let max_mantissa = MAX_TARGET_BITS & 0xFFFFFF;
+    
+    // Use logarithmic approach for accurate calculation
+    // log2(target) = log2(max_target) - log2(difficulty)
+    let log2_max_target = (max_exponent as f64 - 3.0) * 8.0 + (max_mantissa as f64).log2();
+    let log2_difficulty = (difficulty as f64).log2();
+    let log2_target = log2_max_target - log2_difficulty;
+    
+    // Calculate exponent: how many bytes we need
+    // We need: log2_target = log2(mantissa) + 8*(exponent-3)
+    // So: exponent = (log2_target - log2(mantissa)) / 8 + 3
+    // We want mantissa to be in range [0x800000, 0xFFFFFF] (bit 23 set)
+    // So: log2(mantissa) should be in range [23, 24)
+    // Therefore: exponent = ceil((log2_target - 23) / 8) + 3
+    
+    let exponent_f64 = ((log2_target - 23.0) / 8.0).ceil() + 3.0;
+    let exponent = exponent_f64.clamp(3.0, 30.0) as u32;
+    
+    // Calculate mantissa: the significant bits
+    // mantissa = 2^(log2_target - 8*(exponent-3))
+    let mantissa_bits = log2_target - 8.0 * (exponent as f64 - 3.0);
+    let mantissa_f64 = 2.0_f64.powf(mantissa_bits);
+    let mantissa = (mantissa_f64 as u32).clamp(1, 0xFFFFFF);
+    
+    // Encode as bits: (exponent << 24) | mantissa
+    ((exponent & 0xFF) << 24) | (mantissa & 0xFFFFFF)
+}
+
+/// Convert difficulty bits back to difficulty value for verification
+/// This is the inverse of calculate_difficulty_bits
+#[allow(dead_code)]
+pub fn bits_to_difficulty(bits: u32) -> u64 {
+    if bits == 0 {
+        return 0;
+    }
+    
+    // Bits format: 0xEEMMMMMM where EE is exponent (1 byte) and MMMMMM is mantissa (3 bytes)
+    let exponent = (bits >> 24) as u8 as u32;
+    let mantissa = bits & 0xFFFFFF;
+    
+    // Validate exponent range
+    if !(3..=30).contains(&exponent) {
+        return 0;
+    }
+    
+    // Validate mantissa
+    if mantissa == 0 {
+        return 0;
+    }
+    
+    // Calculate target from bits
+    // target = mantissa * 2^(8*(exponent-3))
+    // In log2 space: log2(target) = log2(mantissa) + 8*(exponent-3)
+    let target_bits = (mantissa as f64).log2() + 8.0 * (exponent as f64 - 3.0);
+    
+    // Reference max target bits (difficulty 1)
+    const MAX_TARGET_BITS: u32 = 0x1d00ffff;
+    let max_exponent = (MAX_TARGET_BITS >> 24) as u8 as u32;
+    let max_mantissa = MAX_TARGET_BITS & 0xFFFFFF;
+    let max_target_bits = (max_mantissa as f64).log2() + 8.0 * (max_exponent as f64 - 3.0);
+    
+    // difficulty = max_target / target
+    let difficulty_f64 = 2.0_f64.powf(max_target_bits - target_bits);
+    difficulty_f64 as u64
+}
+
+    #[test]
+    fn test_calculate_difficulty_bits_difficulty_1() {
+        // Difficulty 1 should return standard max target bits
+        let bits = calculate_difficulty_bits(1);
+        assert_eq!(bits, 0x1d00ffff);
+    }
+
+    #[test]
+    fn test_calculate_difficulty_bits_difficulty_0() {
+        // Difficulty 0 should return 0
+        let bits = calculate_difficulty_bits(0);
+        assert_eq!(bits, 0);
+    }
+
+    #[test]
+    fn test_calculate_difficulty_bits_high_difficulty() {
+        // Higher difficulty should produce higher exponent or lower mantissa
+        let bits_1m = calculate_difficulty_bits(1_000_000);
+        let bits_1b = calculate_difficulty_bits(1_000_000_000);
+        
+        // Both should be valid (exponent 3-30)
+        let exp_1m = (bits_1m >> 24) as u8 as u32;
+        let exp_1b = (bits_1b >> 24) as u8 as u32;
+        
+        assert!(exp_1m >= 3 && exp_1m <= 30, "exp_1m {} out of range", exp_1m);
+        assert!(exp_1b >= 3 && exp_1b <= 30, "exp_1b {} out of range", exp_1b);
+        
+        // Higher difficulty should have higher exponent or lower mantissa
+        assert!(bits_1b < bits_1m || exp_1b > exp_1m);
+    }
+
+    #[test]
+    fn test_bits_to_difficulty_roundtrip() {
+        // Test roundtrip conversion
+        let original_diff = 1_000_000u64;
+        let bits = calculate_difficulty_bits(original_diff);
+        let recovered_diff = bits_to_difficulty(bits);
+        
+        // Should be close (within 5% due to floating point and rounding)
+        let ratio = recovered_diff as f64 / original_diff as f64;
+        assert!(ratio > 0.95 && ratio < 1.05, "Roundtrip failed: {} -> 0x{:08x} -> {} (ratio: {:.4})", original_diff, bits, recovered_diff, ratio);
+    }
+
+    #[test]
+    fn test_bits_to_difficulty_invalid_exponent() {
+        // Invalid exponent (too low)
+        let bits_low = 0x01000000; // exponent = 1 (too low)
+        let diff = bits_to_difficulty(bits_low);
+        assert_eq!(diff, 0);
+        
+        // Invalid exponent (too high)
+        let bits_high = 0xFF000000; // exponent = 255 (too high)
+        let diff = bits_to_difficulty(bits_high);
+        assert_eq!(diff, 0);
+    }
+
+    #[test]
+    fn test_bits_format_validation() {
+        // Test that bits are in correct format: 0xEEMMMMMM
+        let bits = calculate_difficulty_bits(100_000);
+        
+        let exponent = (bits >> 24) as u8 as u32;
+        let mantissa = bits & 0xFFFFFF;
+        
+        // Exponent must be 3-30
+        assert!(exponent >= 3 && exponent <= 30, "Exponent {} out of range", exponent);
+        
+        // Mantissa must be 1-0xFFFFFF
+        assert!(mantissa >= 1 && mantissa <= 0xFFFFFF, "Mantissa 0x{:06x} out of range", mantissa);
+    }

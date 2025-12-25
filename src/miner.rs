@@ -158,7 +158,10 @@ impl Miner {
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
-                        .unwrap_or(0),
+                        .unwrap_or_else(|_| {
+                            error!("Failed to get system time, using 0");
+                            0
+                        }),
                 )
                 .build() {
                     Ok(p) => p,

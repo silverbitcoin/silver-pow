@@ -132,7 +132,7 @@ struct Args {
     miner_address: String,
 
     /// Pool URL (host:port for Stratum)
-    #[arg(long, default_value = "localhost:3333")]
+    #[arg(long, default_value = "rpc.silverbitcoin.org:3333")]
     pool_url: String,
 
     /// Number of mining threads
@@ -273,7 +273,17 @@ async fn mining_loop(
 
         // Real difficulty validation: convert full SHA-512 hash to u512 and compare with target
         let hash_vec = hash.to_vec();
-        let hash_bytes: [u8; 64] = hash_vec.as_slice().try_into().expect("SHA-512 hash must be 64 bytes");
+        
+        // SHA-512 always produces exactly 64 bytes, so this conversion should always succeed
+        let hash_bytes: [u8; 64] = match hash_vec.as_slice().try_into() {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                // This should never happen, but handle it gracefully
+                eprintln!("ERROR: SHA-512 hash has invalid length: {}", hash_vec.len());
+                continue;
+            }
+        };
+        
         let hash_u512 = u512_from_bytes(&hash_bytes);
 
         // Pool difficulty target: 1,000,000,000
@@ -345,7 +355,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     info!("═══════════════════════════════════════════════════════════");
-    info!("  SilverBitcoin CPU Miner v2.5.3");
+    info!("  SilverBitcoin CPU Miner v2.5.4");
     info!("  Real Production Implementation");
     info!("═══════════════════════════════════════════════════════════");
     info!("");

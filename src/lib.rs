@@ -22,6 +22,7 @@ pub mod block_submission;
 pub mod reward_distribution;
 pub mod difficulty_adjustment;
 pub mod transaction_engine;
+pub mod websocket_server;
 
 pub use difficulty::{DifficultyAdjustment, DifficultyCalculator, calculate_difficulty_bits, bits_to_difficulty};
 pub use miner::{Miner, MinerConfig, MinerStats};
@@ -37,6 +38,7 @@ pub use block_submission::{BlockSubmissionHandler, BlockSubmissionResult, Submis
 pub use reward_distribution::{RewardDistributionManager, MinerRewardAccount, BlockRewardRecord, RewardStats};
 pub use difficulty_adjustment::{DifficultyAdjustmentManager, DifficultyAdjustmentRecord, DifficultyStats};
 pub use transaction_engine::{TransactionEngine, Transaction, TransactionStatus, TransactionEngineStats};
+pub use websocket_server::{WebSocketServer, BlockchainEvent, SubscriptionType};
 
 use thiserror::Error;
 

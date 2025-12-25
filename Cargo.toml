@@ -1,6 +1,6 @@
 [package]
 name = "silver-pow"
-version = "2.5.3"
+version = "2.5.4"
 edition = "2021"
 rust-version = "1.90"
 authors = ["SilverBitcoin Team <team@silverbitcoin.org>"]
@@ -50,6 +50,11 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-full"] }
 hyper = "1.4"
 
+# WebSocket support
+tokio-tungstenite = "0.28"
+futures-util = "0.3"
+tungstenite = "0.28"
+
 # Mining dependencies
 clap = { version = "4.5", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
@@ -60,7 +65,7 @@ proptest = "1.4"
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 
 [[bin]]
-name = "cpu_miner_real"
+name = "cpu-miner"
 path = "src/bin/cpu_miner_real.rs"
 
 [[bin]]
@@ -68,9 +73,5 @@ name = "stratum_pool"
 path = "src/stratum_pool.rs"
 
 [[bin]]
-name = "silverbitcoin-node"
+name = "slvrd"
 path = "src/bin/node.rs"
-
-[[bin]]
-name = "silverbitcoin-node-production"
-path = "src/bin/node_production.rs"

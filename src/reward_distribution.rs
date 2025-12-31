@@ -2,12 +2,12 @@
 //! Handles block rewards, miner payouts, and reward tracking
 
 use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
+use silver_core::MIST_PER_SLVR;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
-#[allow(unused_imports)]
-use silver_core::MIST_PER_SLVR;
 
 /// Miner reward account
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,10 +213,7 @@ impl RewardDistributionManager {
     /// Get miner balance
     pub async fn get_miner_balance(&self, address: &str) -> u128 {
         let accounts = self.accounts.read().await;
-        accounts
-            .get(address)
-            .map(|acc| acc.balance())
-            .unwrap_or(0)
+        accounts.get(address).map(|acc| acc.balance()).unwrap_or(0)
     }
 
     /// Get all miner accounts
@@ -226,11 +223,7 @@ impl RewardDistributionManager {
     }
 
     /// Process payout to miner
-    pub async fn process_payout(
-        &self,
-        miner_address: &str,
-        amount: u128,
-    ) -> Result<(), String> {
+    pub async fn process_payout(&self, miner_address: &str, amount: u128) -> Result<(), String> {
         let mut accounts = self.accounts.write().await;
 
         let account = accounts
@@ -358,10 +351,16 @@ mod tests {
         assert_eq!(manager.calculate_block_reward(209999), block_reward as u128);
 
         // After first halving
-        assert_eq!(manager.calculate_block_reward(210000), (block_reward / 2) as u128);
+        assert_eq!(
+            manager.calculate_block_reward(210000),
+            (block_reward / 2) as u128
+        );
 
         // After second halving
-        assert_eq!(manager.calculate_block_reward(420000), (block_reward / 4) as u128);
+        assert_eq!(
+            manager.calculate_block_reward(420000),
+            (block_reward / 4) as u128
+        );
     }
 
     #[test]

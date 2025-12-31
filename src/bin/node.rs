@@ -1,5 +1,5 @@
 //! SilverBitcoin Production-Grade Blockchain Node
-//! 
+//!
 //! Real production implementation with:
 //! - Graceful shutdown with SIGTERM/SIGINT handling
 //! - ParityDB ACID transaction management
@@ -8,25 +8,20 @@
 //! - WebSocket server for real-time data streaming
 //! - Real-time blockchain event broadcasting
 
+use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
+use silver_logging::{LogConfig, LogFormat, LogLevel, VisualFormatter};
+use silver_logging::emojis::Emojis;
+use silver_storage::ParityDatabase;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::{broadcast, RwLock};
 use tokio::time::timeout;
-use tracing::{error, info};
-use tracing_subscriber::EnvFilter;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::post,
-    Json, Router,
-};
 use tower_http::cors::CorsLayer;
-use silver_storage::ParityDatabase;
-use std::path::PathBuf;
+use tracing::{error, info, warn};
 
 /// Shutdown signal coordinator
 /// Manages graceful shutdown across all components
@@ -68,22 +63,15 @@ struct AppState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .with_target(true)
-        .with_thread_ids(true)
-        .with_file(true)
-        .with_line_number(true)
-        .init();
+    // Initialize visual logging system
+    let log_config = LogConfig::development()
+        .with_level(LogLevel::Info);
+    silver_logging::init(log_config)?;
 
-    info!("═══════════════════════════════════════════════════════════");
-    info!("  SilverBitcoin Production Blockchain Node v2.5.4");
-    info!("  Quantum-Resistant Consensus Engine");
-    info!("═══════════════════════════════════════════════════════════");
+    // Print startup banner
+    println!("\n{}", VisualFormatter::startup("SilverBitcoin Node", "2.5.4"));
+    println!("{} Quantum-Resistant Consensus Engine", Emojis::CRYPTO);
+    println!("{} Production-Grade Blockchain Implementation\n", Emojis::STARTUP);
 
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -147,27 +135,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    info!("Node Configuration:");
-    info!("  Listen Address: {}", listen_addr);
-    info!("  RPC Address: {}", rpc_addr);
-    info!("  WebSocket Address: {}", ws_addr);
-    info!("  Data Directory: {}", data_dir.display());
+    println!("{} Network Configuration", Emojis::NETWORK);
+    println!("   {} Listen Address: {}", Emojis::ARROW, listen_addr);
+    println!("   {} RPC Address: {}", Emojis::ARROW, rpc_addr);
+    println!("   {} WebSocket Address: {}", Emojis::ARROW, ws_addr);
+    println!("   {} Data Directory: {}\n", Emojis::ARROW, data_dir.display());
 
     // Create data directory if it doesn't exist
     std::fs::create_dir_all(&data_dir)?;
-    info!("Data directory ready: {}", data_dir.display());
+    info!("{} Data directory ready: {}", Emojis::SUCCESS, data_dir.display());
 
     // Initialize database
     let db_path = data_dir.join("blockchain.db");
-    info!("Initializing ParityDB at: {}", db_path.display());
-    
+    info!("{} Initializing ParityDB at: {}", Emojis::STORAGE, db_path.display());
+
     let db = match ParityDatabase::new(&db_path) {
         Ok(db) => {
-            info!("✓ ParityDB initialized successfully");
+            info!("{} ParityDB initialized successfully", Emojis::SUCCESS);
             Arc::new(db)
         }
         Err(e) => {
-            error!("Failed to initialize ParityDB: {}", e);
+            error!("{} Failed to initialize ParityDB: {}", Emojis::ERROR, e);
             std::process::exit(1);
         }
     };
@@ -178,13 +166,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // REAL IMPLEMENTATION: Load blockchain state from ParityDB
     let blockchain_state = match load_blockchain_state_from_db(&db).await {
         Ok(state) => {
-            info!("✓ Loaded blockchain state from ParityDB");
-            info!("  Block count: {}", state.block_count);
-            info!("  Difficulty: {}", state.difficulty);
+            info!("{} Loaded blockchain state from ParityDB", Emojis::SUCCESS);
+            info!("   {} Block count: {}", Emojis::BLOCK, state.block_count);
+            info!("   {} Difficulty: {}", Emojis::DIFFICULTY, state.difficulty);
             Arc::new(RwLock::new(state))
         }
         Err(e) => {
-            info!("No existing blockchain state found, initializing from genesis: {}", e);
+            info!("{} No existing blockchain state found, initializing from genesis: {}", Emojis::INIT, e);
             Arc::new(RwLock::new(silver_core::rpc_api::BlockchainState {
                 block_count: 1,
                 difficulty: 1000000,
@@ -205,17 +193,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let state = blockchain_state.read().await;
         let mut blocks = state.blocks.write().await;
         let block_count = state.block_count;
-        
+
         if blocks.is_empty() && block_count > 1 {
-            info!("Populating blocks map for {} existing blocks...", block_count);
+            info!(
+                "Populating blocks map for {} existing blocks...",
+                block_count
+            );
             let default_miner = "SLVRyNacCfuRochYj3hC8AFaQtoUDQ8fG8W6hohNVgJGj9o3kPu7eUR6F5FsRR5z118WHrAhMMZzHRBGa8MT5RcPzut".to_string();
-            
+
             for height in 0..block_count {
                 blocks.insert(height, default_miner.clone());
             }
             info!("✓ Populated blocks map with {} entries", block_count);
         }
-        
+
         let mut balances = state.balances.write().await;
         if balances.is_empty() && block_count > 1 {
             info!("Populating balances for miner...");
@@ -223,22 +214,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let reward_per_block = 50_000_000_000u128;
             let total_reward = reward_per_block * ((block_count - 1) as u128);
             balances.insert(default_miner, total_reward);
-            info!("✓ Populated balances: {} MIST for {} blocks", total_reward, block_count - 1);
+            info!(
+                "✓ Populated balances: {} MIST for {} blocks",
+                total_reward,
+                block_count - 1
+            );
         }
     }
 
     // Initialize WebSocket server for real-time data
-    info!("Initializing WebSocket server for real-time data...");
+    info!("{} Initializing WebSocket server for real-time data...", Emojis::BROADCAST);
     let ws_server = Arc::new(silver_pow::WebSocketServer::new(ws_addr));
     let ws_server_clone = ws_server.clone();
-    
+
     tokio::spawn(async move {
         if let Err(e) = ws_server_clone.start().await {
-            error!("WebSocket server error: {}", e);
+            error!("{} WebSocket server error: {}", Emojis::ERROR, e);
         }
     });
-    
-    info!("✓ WebSocket server started on ws://{}", ws_addr);
+
+    info!("{} WebSocket server started on ws://{}", Emojis::SUCCESS, ws_addr);
 
     // Create application state
     let app_state = Arc::new(AppState {
@@ -262,25 +257,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_state(app_state.clone());
 
     // Start RPC server
-    info!("Starting RPC server on {}", rpc_addr);
+    info!("{} Starting RPC server on {}", Emojis::NETWORK, rpc_addr);
     let rpc_listener = tokio::net::TcpListener::bind(rpc_addr).await?;
-    info!("RPC server listening on {}", rpc_addr);
+    info!("{} RPC server listening on {}", Emojis::SUCCESS, rpc_addr);
 
     // Initialize genesis block
-    info!("Initializing genesis block...");
+    info!("{} Initializing genesis block...", Emojis::BLOCK);
     let genesis = silver_core::GenesisBlock::mainnet();
-    info!("Genesis block hash: {}", genesis.hash_short());
-    info!("Genesis difficulty: {}", genesis.difficulty);
+    info!("{} Genesis block hash: {}", Emojis::SUCCESS, genesis.hash_short());
+    info!("   {} Genesis difficulty: {}", Emojis::DIFFICULTY, genesis.difficulty);
 
     // Node is now running
-    info!("═══════════════════════════════════════════════════════════");
-    info!("  ✓ Blockchain node is running");
-    info!("  ✓ P2P Network: {}", listen_addr);
-    info!("  ✓ RPC Server: {}", rpc_addr);
-    info!("  ✓ WebSocket Server: ws://{}", ws_addr);
-    info!("  ✓ Data Directory: {}", data_dir.display());
-    info!("  ✓ Genesis Block: {}", genesis.hash_short());
-    info!("═══════════════════════════════════════════════════════════");
+    println!("\n{}", "═".repeat(70));
+    println!("{} {} Blockchain Node is Running", Emojis::STARTUP, "SilverBitcoin");
+    println!("{}", "═".repeat(70));
+    println!("{} P2P Network: {}", Emojis::NETWORK, listen_addr);
+    println!("{} RPC Server: {}", Emojis::BROADCAST, rpc_addr);
+    println!("{} WebSocket Server: ws://{}", Emojis::BROADCAST, ws_addr);
+    println!("{} Data Directory: {}", Emojis::STORAGE, data_dir.display());
+    println!("{} Genesis Block: {}", Emojis::BLOCK, genesis.hash_short());
+    println!("{}\n", "═".repeat(70));
 
     // Main server loop with graceful shutdown
     let server_result = tokio::select! {
@@ -303,43 +299,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Graceful shutdown sequence
-    info!("Starting graceful shutdown sequence...");
-    
-    info!("Step 1: Stopping request acceptance");
+    info!("{} Starting graceful shutdown sequence...", Emojis::SHUTDOWN);
+
+    info!("   {} Step 1: Stopping request acceptance", Emojis::ARROW);
     shutdown_coordinator.request_shutdown();
-    
-    info!("Step 2: Waiting for in-flight requests to complete");
+
+    info!("   {} Step 2: Waiting for in-flight requests to complete", Emojis::ARROW);
     let _ = timeout(Duration::from_secs(10), async {
         tokio::time::sleep(Duration::from_secs(2)).await;
-    }).await;
+    })
+    .await;
 
-    info!("Step 3: Flushing database and committing pending transactions");
-    
+    info!("   {} Step 3: Flushing database and committing pending transactions", Emojis::ARROW);
+
     if let Err(e) = save_blockchain_state_to_db(&db, &*blockchain_state.read().await).await {
-        error!("Error saving blockchain state: {}", e);
+        error!("{} Error saving blockchain state: {}", Emojis::ERROR, e);
     } else {
-        info!("✓ Blockchain state saved successfully");
+        info!("{} Blockchain state saved successfully", Emojis::SUCCESS);
     }
-    
+
     if let Err(e) = flush_database(&db).await {
-        error!("Error flushing database: {}", e);
+        error!("{} Error flushing database: {}", Emojis::ERROR, e);
     } else {
-        info!("✓ Database flushed successfully");
+        info!("{} Database flushed successfully", Emojis::SUCCESS);
     }
 
-    info!("Step 4: Verifying data integrity");
+    info!("   {} Step 4: Verifying data integrity", Emojis::ARROW);
     if let Err(e) = verify_database_integrity(&db).await {
-        error!("Data integrity check failed: {}", e);
+        error!("{} Data integrity check failed: {}", Emojis::ERROR, e);
     } else {
-        info!("✓ Data integrity verified");
+        info!("{} Data integrity verified", Emojis::SUCCESS);
     }
 
-    info!("Step 5: Waiting for signal handler to complete");
+    info!("   {} Step 5: Waiting for signal handler to complete", Emojis::ARROW);
     let _ = timeout(Duration::from_secs(5), signal_handler).await;
 
-    info!("═══════════════════════════════════════════════════════════");
-    info!("  Node shutdown complete");
-    info!("═══════════════════════════════════════════════════════════");
+    println!("\n{}", "═".repeat(70));
+    println!("{} {} Node shutdown complete", Emojis::SHUTDOWN, "SilverBitcoin");
+    println!("{}\n", "═".repeat(70));
 
     server_result
 }
@@ -353,11 +350,11 @@ async fn setup_signal_handlers(coordinator: &ShutdownCoordinator) {
         match signal::unix::signal(signal::unix::SignalKind::terminate()) {
             Ok(mut sigterm) => {
                 sigterm.recv().await;
-                info!("Received SIGTERM signal");
+                info!("{} Received SIGTERM signal", Emojis::ALERT);
                 coordinator_sigterm.request_shutdown();
             }
             Err(e) => {
-                error!("Failed to setup SIGTERM handler: {}", e);
+                error!("{} Failed to setup SIGTERM handler: {}", Emojis::ERROR, e);
             }
         }
     });
@@ -365,11 +362,11 @@ async fn setup_signal_handlers(coordinator: &ShutdownCoordinator) {
     let sigint_handler = tokio::spawn(async move {
         match signal::ctrl_c().await {
             Ok(_) => {
-                info!("Received SIGINT signal (Ctrl+C)");
+                info!("{} Received SIGINT signal (Ctrl+C)", Emojis::ALERT);
                 coordinator_sigint.request_shutdown();
             }
             Err(e) => {
-                error!("Failed to setup SIGINT handler: {}", e);
+                error!("{} Failed to setup SIGINT handler: {}", Emojis::ERROR, e);
             }
         }
     });
@@ -386,19 +383,17 @@ async fn flush_database(db: &ParityDatabase) -> Result<(), Box<dyn std::error::E
     let flush_timestamp = chrono::Local::now().timestamp();
     let flush_key = format!("__flush_verification_{}__", flush_timestamp).into_bytes();
     let flush_value = b"flushed".to_vec();
-    
+
     db.put("metadata", &flush_key, &flush_value)?;
-    
+
     match db.get("metadata", &flush_key)? {
         Some(value) if value == flush_value => {
-            info!("Database flush verification successful");
+            info!("{} Database flush verification successful", Emojis::SUCCESS);
             // Clean up verification key
             let _ = db.delete("metadata", &flush_key);
             Ok(())
         }
-        _ => {
-            Err("Database flush verification failed".into())
-        }
+        _ => Err("Database flush verification failed".into()),
     }
 }
 
@@ -406,17 +401,15 @@ async fn flush_database(db: &ParityDatabase) -> Result<(), Box<dyn std::error::E
 async fn verify_database_integrity(db: &ParityDatabase) -> Result<(), Box<dyn std::error::Error>> {
     let integrity_key = b"__integrity_check__".to_vec();
     let integrity_value = b"integrity_verified".to_vec();
-    
+
     db.put("metadata", &integrity_key, &integrity_value)?;
-    
+
     match db.get("metadata", &integrity_key)? {
         Some(value) if value == integrity_value => {
-            info!("Database integrity check passed");
+            info!("{} Database integrity check passed", Emojis::SUCCESS);
             Ok(())
         }
-        _ => {
-            Err("Database integrity check failed".into())
-        }
+        _ => Err("Database integrity check failed".into()),
     }
 }
 
@@ -437,21 +430,26 @@ async fn handle_rpc(
                 }),
                 id: payload.id,
             }),
-        ).into_response();
+        )
+            .into_response();
     }
 
     let result = silver_core::rpc_api::handle_rpc_method(
         &payload.method,
         &payload.params,
         state.blockchain_state.clone(),
-    ).await;
+    )
+    .await;
 
     if payload.method == "submitblock" {
         let blockchain_state = state.blockchain_state.read().await;
-        if let Err(e) = save_blockchain_state_to_db(&state.db, &*blockchain_state).await {
-            tracing::error!("Failed to save blockchain state after block submission: {}", e);
+        if let Err(e) = save_blockchain_state_to_db(&state.db, &blockchain_state).await {
+            tracing::error!(
+                "Failed to save blockchain state after block submission: {}",
+                e
+            );
         }
-        
+
         // Broadcast new block event to WebSocket clients
         if let Ok(result) = &result {
             if let Some(block_hash) = result.get("hash").and_then(|v| v.as_str()) {
@@ -524,18 +522,22 @@ fn print_help() {
 async fn load_blockchain_state_from_db(
     db: &Arc<ParityDatabase>,
 ) -> Result<silver_core::rpc_api::BlockchainState, Box<dyn std::error::Error>> {
-    let block_count_bytes = db.get("metadata", b"blockchain:block_count")?
+    let block_count_bytes = db
+        .get("metadata", b"blockchain:block_count")?
         .ok_or("No block count found in database")?;
     let block_count = u64::from_le_bytes(
-        block_count_bytes.try_into()
-            .map_err(|_| "Invalid block count format")?
+        block_count_bytes
+            .try_into()
+            .map_err(|_| "Invalid block count format")?,
     );
 
-    let difficulty_bytes = db.get("metadata", b"blockchain:difficulty")?
+    let difficulty_bytes = db
+        .get("metadata", b"blockchain:difficulty")?
         .ok_or("No difficulty found in database")?;
     let difficulty = u64::from_le_bytes(
-        difficulty_bytes.try_into()
-            .map_err(|_| "Invalid difficulty format")?
+        difficulty_bytes
+            .try_into()
+            .map_err(|_| "Invalid difficulty format")?,
     );
 
     let mining_address = match db.get("metadata", b"blockchain:mining_address")? {
@@ -544,12 +546,14 @@ async fn load_blockchain_state_from_db(
     };
 
     let mut balances = std::collections::HashMap::new();
-    
+
     if let Ok(Some(balances_json)) = db.get("metadata", b"blockchain:balances") {
         if let Ok(json_str) = String::from_utf8(balances_json) {
-            if let Ok(loaded_balances) = serde_json::from_str::<std::collections::HashMap<String, u128>>(&json_str) {
+            if let Ok(loaded_balances) =
+                serde_json::from_str::<std::collections::HashMap<String, u128>>(&json_str)
+            {
                 balances = loaded_balances;
-                tracing::info!("Loaded {} address balances from database", balances.len());
+                info!("{} Loaded {} address balances from database", Emojis::SUCCESS, balan);
             }
         }
     }
@@ -576,13 +580,13 @@ async fn save_blockchain_state_to_db(
     db.put(
         "metadata",
         b"blockchain:block_count",
-        &state.block_count.to_le_bytes().to_vec(),
+        state.block_count.to_le_bytes().as_ref(),
     )?;
 
     db.put(
         "metadata",
         b"blockchain:difficulty",
-        &state.difficulty.to_le_bytes().to_vec(),
+        state.difficulty.to_le_bytes().as_ref(),
     )?;
 
     db.put(
@@ -593,14 +597,14 @@ async fn save_blockchain_state_to_db(
 
     let balances = state.balances.read().await;
     let balances_json = serde_json::to_string(&*balances)?;
-    db.put(
-        "metadata",
-        b"blockchain:balances",
-        balances_json.as_bytes(),
-    )?;
+    db.put("metadata", b"blockchain:balances", balances_json.as_bytes())?;
 
-    tracing::info!("Saved blockchain state to ParityDB (block_count: {}, addresses: {})", 
-        state.block_count, balances.len());
+    info!(
+        "{} Saved blockchain state to ParityDB (block_count: {}, addresses: {}",
+        Emojis::SUCCESS,
+        state.block_count,
+      n()
 
-    Ok(())
-}
+
+ (())
+}   Ok

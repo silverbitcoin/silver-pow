@@ -32,7 +32,9 @@ impl WorkPackage {
         difficulty: u64,
     ) -> Result<Self> {
         if difficulty == 0 {
-            return Err(PoWError::InvalidDifficulty("Difficulty cannot be zero".to_string()));
+            return Err(PoWError::InvalidDifficulty(
+                "Difficulty cannot be zero".to_string(),
+            ));
         }
 
         if chain_id >= 20 {
@@ -40,15 +42,21 @@ impl WorkPackage {
         }
 
         if block_hash.len() != 64 {
-            return Err(PoWError::InvalidDifficulty("Block hash must be 64 bytes (SHA-512)".to_string()));
+            return Err(PoWError::InvalidDifficulty(
+                "Block hash must be 64 bytes (SHA-512)".to_string(),
+            ));
         }
 
         if parent_hash.len() != 64 {
-            return Err(PoWError::InvalidDifficulty("Parent hash must be 64 bytes (SHA-512)".to_string()));
+            return Err(PoWError::InvalidDifficulty(
+                "Parent hash must be 64 bytes (SHA-512)".to_string(),
+            ));
         }
 
         if merkle_root.len() != 64 {
-            return Err(PoWError::InvalidDifficulty("Merkle root must be 64 bytes (SHA-512)".to_string()));
+            return Err(PoWError::InvalidDifficulty(
+                "Merkle root must be 64 bytes (SHA-512)".to_string(),
+            ));
         }
 
         // Calculate target from difficulty using proper big integer arithmetic
@@ -82,7 +90,9 @@ impl WorkPackage {
     /// MAX_TARGET = 2^512 - 1 (for SHA-512)
     pub fn calculate_target_from_difficulty(difficulty: u64) -> Result<Vec<u8>> {
         if difficulty == 0 {
-            return Err(PoWError::InvalidDifficulty("Difficulty cannot be zero".to_string()));
+            return Err(PoWError::InvalidDifficulty(
+                "Difficulty cannot be zero".to_string(),
+            ));
         }
 
         // For SHA-512 (64 bytes = 512 bits)
@@ -98,7 +108,11 @@ impl WorkPackage {
 
             if bytes_to_zero < 64 {
                 // Zero out the lower bytes
-                for byte in target.iter_mut().skip(64 - bytes_to_zero).take(bytes_to_zero) {
+                for byte in target
+                    .iter_mut()
+                    .skip(64 - bytes_to_zero)
+                    .take(bytes_to_zero)
+                {
                     *byte = 0;
                 }
 
@@ -183,8 +197,6 @@ impl WorkProof {
             miner_address,
         }
     }
-
-
 
     pub fn verify(&self, target: &[u8]) -> Result<bool> {
         // SHA-512 produces 64 bytes
@@ -290,15 +302,7 @@ mod tests {
 
     #[test]
     fn test_work_package_zero_difficulty() {
-        let work = WorkPackage::new(
-            0,
-            100,
-            vec![1u8; 32],
-            vec![2u8; 32],
-            vec![3u8; 32],
-            1000,
-            0,
-        );
+        let work = WorkPackage::new(0, 100, vec![1u8; 32], vec![2u8; 32], vec![3u8; 32], 1000, 0);
 
         assert!(work.is_err());
     }
@@ -309,7 +313,7 @@ mod tests {
         let work = WorkPackage::new(
             0,
             100,
-            vec![1u8; 63],  // Invalid: 63 bytes instead of 64
+            vec![1u8; 63], // Invalid: 63 bytes instead of 64
             vec![2u8; 64],
             vec![3u8; 64],
             1000,
@@ -379,17 +383,11 @@ mod tests {
         let hash_result = vec![0u8; 64];
         let target = vec![255u8; 64];
 
-        let proof = WorkProof::builder(
-            vec![1u8; 64],
-            0,
-            vec![2u8; 32],
-            hash_result,
-            vec![3u8; 20],
-        )
-        .with_block_height(100)
-        .with_nonce(12345)
-        .build()
-        .unwrap();
+        let proof = WorkProof::builder(vec![1u8; 64], 0, vec![2u8; 32], hash_result, vec![3u8; 20])
+            .with_block_height(100)
+            .with_nonce(12345)
+            .build()
+            .unwrap();
 
         let result = proof.verify(&target);
         assert!(result.is_ok());
@@ -401,17 +399,11 @@ mod tests {
         let hash_result = vec![255u8; 64];
         let target = vec![0u8; 64];
 
-        let proof = WorkProof::builder(
-            vec![1u8; 64],
-            0,
-            vec![2u8; 32],
-            hash_result,
-            vec![3u8; 20],
-        )
-        .with_block_height(100)
-        .with_nonce(12345)
-        .build()
-        .unwrap();
+        let proof = WorkProof::builder(vec![1u8; 64], 0, vec![2u8; 32], hash_result, vec![3u8; 20])
+            .with_block_height(100)
+            .with_nonce(12345)
+            .build()
+            .unwrap();
 
         let result = proof.verify(&target);
         assert!(result.is_ok());

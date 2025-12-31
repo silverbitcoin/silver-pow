@@ -40,8 +40,6 @@ impl BlockHeader {
         }
     }
 
-
-
     pub fn hash(&self) -> Vec<u8> {
         let mut hasher = Sha512::new();
         hasher.update(self.version.to_le_bytes());
@@ -83,15 +81,17 @@ impl BlockValidator {
     pub fn validate_header(&self, header: &BlockHeader) -> Result<()> {
         // Validate difficulty
         if header.difficulty < self.config.min_difficulty {
-            return Err(PoWError::InvalidBlock(
-                format!("Difficulty {} below minimum", header.difficulty),
-            ));
+            return Err(PoWError::InvalidBlock(format!(
+                "Difficulty {} below minimum",
+                header.difficulty
+            )));
         }
 
         if header.difficulty > self.config.max_difficulty {
-            return Err(PoWError::InvalidBlock(
-                format!("Difficulty {} exceeds maximum", header.difficulty),
-            ));
+            return Err(PoWError::InvalidBlock(format!(
+                "Difficulty {} exceeds maximum",
+                header.difficulty
+            )));
         }
 
         // Validate timestamp (not too far in future)
@@ -102,7 +102,9 @@ impl BlockValidator {
 
         if header.timestamp > now + 7200 {
             // 2 hours in future
-            return Err(PoWError::InvalidBlock("Block timestamp too far in future".to_string()));
+            return Err(PoWError::InvalidBlock(
+                "Block timestamp too far in future".to_string(),
+            ));
         }
 
         // Validate chain ID
@@ -115,16 +117,15 @@ impl BlockValidator {
             return Err(PoWError::InvalidBlock("Invalid block version".to_string()));
         }
 
-        debug!("Block header validation passed for chain {} height {}", header.chain_id, header.block_height);
+        debug!(
+            "Block header validation passed for chain {} height {}",
+            header.chain_id, header.block_height
+        );
         Ok(())
     }
 
     /// Validate proof of work
-    pub fn validate_proof_of_work(
-        &self,
-        header: &BlockHeader,
-        proof: &WorkProof,
-    ) -> Result<bool> {
+    pub fn validate_proof_of_work(&self, header: &BlockHeader, proof: &WorkProof) -> Result<bool> {
         // Verify nonce matches
         if proof.nonce != header.nonce || proof.extra_nonce != header.extra_nonce {
             return Err(PoWError::InvalidBlock("Nonce mismatch".to_string()));
@@ -174,7 +175,9 @@ impl BlockValidator {
     /// max_target = 2^512 - 1 (all bits set)
     fn calculate_target_from_difficulty(&self, difficulty: u64) -> Result<Vec<u8>> {
         if difficulty == 0 {
-            return Err(PoWError::InvalidDifficulty("Difficulty cannot be zero".to_string()));
+            return Err(PoWError::InvalidDifficulty(
+                "Difficulty cannot be zero".to_string(),
+            ));
         }
 
         // For SHA-512, calculate target from difficulty
@@ -185,23 +188,23 @@ impl BlockValidator {
         // difficulty 65536 = target with ~2 leading zero bytes (16 bits)
         // difficulty 16777216 = target with ~3 leading zero bytes (24 bits)
         // difficulty 4294967296 = target with ~4 leading zero bytes (32 bits)
-        
+
         // Calculate leading zero BITS needed: log2(difficulty)
         let log2_difficulty = (difficulty as f64).log2();
-        
+
         // Convert bits to bytes: divide by 8 and round up
         let leading_zero_bits = log2_difficulty as u32;
         let leading_zero_bytes = (leading_zero_bits / 8) as usize;
         let remaining_bits = leading_zero_bits % 8;
-        
+
         // Build target: leading_zero_bytes of 0x00, then a partial byte if needed, then 0xFF for the rest
         let mut target = vec![0xFFu8; 64];
-        
+
         // Set leading zero bytes
-        for i in 0..leading_zero_bytes.min(64) {
-            target[i] = 0x00;
+        for target_byte in target.iter_mut().take(leading_zero_bytes.min(64)) {
+            *target_byte = 0x00;
         }
-        
+
         // Set partial byte if there are remaining bits
         if remaining_bits > 0 && leading_zero_bytes < 64 {
             // Create a mask for the remaining bits
@@ -209,7 +212,7 @@ impl BlockValidator {
             let mask = (1u8 << (8 - remaining_bits)) - 1;
             target[leading_zero_bytes] = mask;
         }
-        
+
         Ok(target)
     }
 
@@ -220,9 +223,10 @@ impl BlockValidator {
         current_height: u64,
     ) -> Result<()> {
         if current_height != previous_height + 1 {
-            return Err(PoWError::InvalidBlock(
-                format!("Invalid block height sequence: {} -> {}", previous_height, current_height),
-            ));
+            return Err(PoWError::InvalidBlock(format!(
+                "Invalid block height sequence: {} -> {}",
+                previous_height, current_height
+            )));
         }
 
         Ok(())
@@ -254,15 +258,17 @@ impl BlockValidator {
         let min_decrease = previous_difficulty / 4;
 
         if current_difficulty > max_increase {
-            return Err(PoWError::InvalidBlock(
-                format!("Difficulty increase too large: {} -> {}", previous_difficulty, current_difficulty),
-            ));
+            return Err(PoWError::InvalidBlock(format!(
+                "Difficulty increase too large: {} -> {}",
+                previous_difficulty, current_difficulty
+            )));
         }
 
         if current_difficulty < min_decrease {
-            return Err(PoWError::InvalidBlock(
-                format!("Difficulty decrease too large: {} -> {}", previous_difficulty, current_difficulty),
-            ));
+            return Err(PoWError::InvalidBlock(format!(
+                "Difficulty decrease too large: {} -> {}",
+                previous_difficulty, current_difficulty
+            )));
         }
 
         Ok(())
@@ -275,18 +281,13 @@ mod tests {
 
     #[test]
     fn test_block_header_creation() {
-        let header = BlockHeader::builder(
-            1,
-            vec![1u8; 32],
-            vec![2u8; 32],
-            1000,
-        )
-        .with_difficulty(1_000_000)
-        .with_chain_id(0)
-        .with_block_height(100)
-        .with_nonce(12345)
-        .with_extra_nonce(0)
-        .build();
+        let header = BlockHeader::builder(1, vec![1u8; 32], vec![2u8; 32], 1000)
+            .with_difficulty(1_000_000)
+            .with_chain_id(0)
+            .with_block_height(100)
+            .with_nonce(12345)
+            .with_extra_nonce(0)
+            .build();
 
         assert!(header.is_ok());
         let header = header.unwrap();
@@ -295,31 +296,21 @@ mod tests {
 
     #[test]
     fn test_block_header_invalid_parent_hash() {
-        let header = BlockHeader::builder(
-            1,
-            vec![1u8; 31],
-            vec![2u8; 32],
-            1000,
-        )
-        .with_difficulty(1_000_000)
-        .build();
+        let header = BlockHeader::builder(1, vec![1u8; 31], vec![2u8; 32], 1000)
+            .with_difficulty(1_000_000)
+            .build();
 
         assert!(header.is_err());
     }
 
     #[test]
     fn test_block_header_hash() {
-        let header = BlockHeader::builder(
-            1,
-            vec![1u8; 32],
-            vec![2u8; 32],
-            1000,
-        )
-        .with_difficulty(1_000_000)
-        .with_block_height(100)
-        .with_nonce(12345)
-        .build()
-        .unwrap();
+        let header = BlockHeader::builder(1, vec![1u8; 32], vec![2u8; 32], 1000)
+            .with_difficulty(1_000_000)
+            .with_block_height(100)
+            .with_nonce(12345)
+            .build()
+            .unwrap();
 
         let hash = header.hash();
         assert_eq!(hash.len(), 64);
@@ -341,31 +332,21 @@ mod tests {
         let config = PoWConfig::default();
         let validator = BlockValidator::new(config);
 
-        let header = BlockHeader::builder(
-            1,
-            vec![1u8; 32],
-            vec![2u8; 32],
-            1000,
-        )
-        .with_difficulty(1_000_000)
-        .with_block_height(100)
-        .with_nonce(12345)
-        .build()
-        .unwrap();
+        let header = BlockHeader::builder(1, vec![1u8; 32], vec![2u8; 32], 1000)
+            .with_difficulty(1_000_000)
+            .with_block_height(100)
+            .with_nonce(12345)
+            .build()
+            .unwrap();
 
         assert!(validator.validate_header(&header).is_ok());
     }
 
     #[test]
     fn test_validate_header_invalid_difficulty() {
-        let header = BlockHeader::builder(
-            1,
-            vec![1u8; 32],
-            vec![2u8; 32],
-            1000,
-        )
-        .with_difficulty(0)
-        .build();
+        let header = BlockHeader::builder(1, vec![1u8; 32], vec![2u8; 32], 1000)
+            .with_difficulty(0)
+            .build();
 
         assert!(header.is_err());
     }
@@ -396,12 +377,20 @@ mod tests {
         let base_diff = 1_000_000u64;
 
         // Valid adjustments
-        assert!(validator.validate_difficulty_adjustment(base_diff, base_diff * 2).is_ok());
-        assert!(validator.validate_difficulty_adjustment(base_diff, base_diff / 2).is_ok());
+        assert!(validator
+            .validate_difficulty_adjustment(base_diff, base_diff * 2)
+            .is_ok());
+        assert!(validator
+            .validate_difficulty_adjustment(base_diff, base_diff / 2)
+            .is_ok());
 
         // Invalid adjustments
-        assert!(validator.validate_difficulty_adjustment(base_diff, base_diff * 5).is_err());
-        assert!(validator.validate_difficulty_adjustment(base_diff, base_diff / 5).is_err());
+        assert!(validator
+            .validate_difficulty_adjustment(base_diff, base_diff * 5)
+            .is_err());
+        assert!(validator
+            .validate_difficulty_adjustment(base_diff, base_diff / 5)
+            .is_err());
     }
 }
 
@@ -446,15 +435,21 @@ impl BlockHeaderBuilderValidator {
 
     pub fn build(self) -> Result<BlockHeader> {
         if self.parent_hash.len() != 32 {
-            return Err(PoWError::InvalidBlock("Invalid parent hash length".to_string()));
+            return Err(PoWError::InvalidBlock(
+                "Invalid parent hash length".to_string(),
+            ));
         }
 
         if self.merkle_root.len() != 32 {
-            return Err(PoWError::InvalidBlock("Invalid merkle root length".to_string()));
+            return Err(PoWError::InvalidBlock(
+                "Invalid merkle root length".to_string(),
+            ));
         }
 
         if self.difficulty == 0 {
-            return Err(PoWError::InvalidBlock("Difficulty cannot be zero".to_string()));
+            return Err(PoWError::InvalidBlock(
+                "Difficulty cannot be zero".to_string(),
+            ));
         }
 
         Ok(BlockHeader {

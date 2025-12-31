@@ -113,11 +113,7 @@ pub struct MinerShare {
 
 impl MinerShare {
     /// Create MinerShare using builder pattern
-    pub fn builder(
-        miner_id: Vec<u8>,
-        work_id: Vec<u8>,
-        hash_result: Vec<u8>,
-    ) -> MinerShareBuilder {
+    pub fn builder(miner_id: Vec<u8>, work_id: Vec<u8>, hash_result: Vec<u8>) -> MinerShareBuilder {
         MinerShareBuilder {
             miner_id,
             work_id,
@@ -150,16 +146,18 @@ impl MinerShare {
     ) -> Result<Self> {
         // Validate miner_id
         if miner_id.is_empty() || miner_id.len() > 64 {
-            return Err(PoWError::PoolError(
-                format!("Invalid miner_id length: {}", miner_id.len()),
-            ));
+            return Err(PoWError::PoolError(format!(
+                "Invalid miner_id length: {}",
+                miner_id.len()
+            )));
         }
 
         // Validate hash_result
         if hash_result.len() != 64 {
-            return Err(PoWError::PoolError(
-                format!("Invalid hash_result length: expected 64, got {}", hash_result.len()),
-            ));
+            return Err(PoWError::PoolError(format!(
+                "Invalid hash_result length: expected 64, got {}",
+                hash_result.len()
+            )));
         }
 
         // Validate difficulty
@@ -237,7 +235,10 @@ pub struct MiningPool {
 
 impl MiningPool {
     pub fn new(config: PoolConfig) -> Self {
-        info!("Creating mining pool with {} max miners, {}% fee", config.max_miners, config.pool_fee_percentage);
+        info!(
+            "Creating mining pool with {} max miners, {}% fee",
+            config.max_miners, config.pool_fee_percentage
+        );
 
         Self {
             config,
@@ -270,7 +271,10 @@ impl MiningPool {
 
         // Create miner account
         let mut accounts = self.miner_accounts.write().await;
-        accounts.insert(miner_id.clone(), MinerAccount::new(miner_id.clone(), miner_address));
+        accounts.insert(
+            miner_id.clone(),
+            MinerAccount::new(miner_id.clone(), miner_address),
+        );
 
         let mut stats = self.stats.write().await;
         stats.connected_miners = miners.len();
@@ -290,7 +294,10 @@ impl MiningPool {
         let mut stats = self.stats.write().await;
         stats.connected_miners = miners.len();
 
-        debug!("Miner unregistered. Total miners: {}", stats.connected_miners);
+        debug!(
+            "Miner unregistered. Total miners: {}",
+            stats.connected_miners
+        );
         Ok(())
     }
 
@@ -343,7 +350,10 @@ impl MiningPool {
         let is_block = share.is_block;
         if is_block {
             stats.blocks_found += 1;
-            info!("Block found by miner! Chain: {}, Height: {}", share.chain_id, share.block_height);
+            info!(
+                "Block found by miner! Chain: {}, Height: {}",
+                share.chain_id, share.block_height
+            );
         }
 
         stats.shares_accepted += 1;
@@ -396,19 +406,24 @@ impl MiningPool {
     pub fn validate_miner_address(address: &[u8]) -> Result<()> {
         // Miner address must be 20 bytes (160 bits) for compatibility
         if address.len() != 20 {
-            return Err(PoWError::PoolError(
-                format!("Invalid miner address length: expected 20 bytes, got {}", address.len()),
-            ));
+            return Err(PoWError::PoolError(format!(
+                "Invalid miner address length: expected 20 bytes, got {}",
+                address.len()
+            )));
         }
 
         // Address cannot be all zeros
         if address.iter().all(|&b| b == 0) {
-            return Err(PoWError::PoolError("Miner address cannot be all zeros".to_string()));
+            return Err(PoWError::PoolError(
+                "Miner address cannot be all zeros".to_string(),
+            ));
         }
 
         // Address cannot be all ones
         if address.iter().all(|&b| b == 0xFF) {
-            return Err(PoWError::PoolError("Miner address cannot be all ones".to_string()));
+            return Err(PoWError::PoolError(
+                "Miner address cannot be all ones".to_string(),
+            ));
         }
 
         Ok(())
@@ -456,7 +471,9 @@ impl MiningPool {
 
         // Validate amount
         if amount == 0 {
-            return Err(PoWError::PoolError("Payout amount cannot be zero".to_string()));
+            return Err(PoWError::PoolError(
+                "Payout amount cannot be zero".to_string(),
+            ));
         }
 
         // Update miner account
@@ -546,7 +563,11 @@ impl MiningPool {
             return 0.0;
         }
 
-        let block_shares: u64 = shares.iter().filter(|s| s.is_block).map(|s| s.difficulty).sum();
+        let block_shares: u64 = shares
+            .iter()
+            .filter(|s| s.is_block)
+            .map(|s| s.difficulty)
+            .sum();
         let total_shares: u64 = shares.iter().map(|s| s.difficulty).sum();
 
         if total_shares == 0 {
@@ -577,7 +598,11 @@ impl MiningPool {
         let shares = self.shares.read().await;
 
         let total_shares: u64 = shares.iter().map(|s| s.difficulty).sum();
-        let block_shares: u64 = shares.iter().filter(|s| s.is_block).map(|s| s.difficulty).sum();
+        let block_shares: u64 = shares
+            .iter()
+            .filter(|s| s.is_block)
+            .map(|s| s.difficulty)
+            .sum();
 
         let mut total_hashrate = 0.0;
         for miner in miners.values() {
@@ -628,7 +653,10 @@ mod tests {
         let config = PoolConfig::new();
         let pool = MiningPool::new(config);
 
-        assert!(pool.register_miner(vec![10, 11], vec![12, 13]).await.is_ok());
+        assert!(pool
+            .register_miner(vec![10, 11], vec![12, 13])
+            .await
+            .is_ok());
 
         let count = pool.get_miner_count().await;
         assert_eq!(count, 1);
@@ -640,7 +668,9 @@ mod tests {
         let pool = MiningPool::new(config);
 
         let miner_id = vec![10, 11];
-        pool.register_miner(miner_id.clone(), vec![12, 13]).await.unwrap();
+        pool.register_miner(miner_id.clone(), vec![12, 13])
+            .await
+            .unwrap();
 
         let result = pool.register_miner(miner_id, vec![12, 13]).await;
         assert!(result.is_err());
@@ -652,7 +682,9 @@ mod tests {
         let pool = MiningPool::new(config);
 
         let miner_id = vec![10, 11];
-        pool.register_miner(miner_id.clone(), vec![12, 13]).await.unwrap();
+        pool.register_miner(miner_id.clone(), vec![12, 13])
+            .await
+            .unwrap();
         assert_eq!(pool.get_miner_count().await, 1);
 
         pool.unregister_miner(&miner_id).await.unwrap();
@@ -706,7 +738,10 @@ mod tests {
 
         pool.submit_share(share).await.unwrap();
 
-        let payout = pool.calculate_miner_payout(&miner_id, 50_000_000_000).await.unwrap();
+        let payout = pool
+            .calculate_miner_payout(&miner_id, 50_000_000_000)
+            .await
+            .unwrap();
         assert!(payout > 0);
     }
 
@@ -773,7 +808,9 @@ impl MinerShareBuilder {
 
     pub fn build(self) -> Result<MinerShare> {
         if self.hash_result.len() != 64 {
-            return Err(PoWError::PoolError("Invalid hash result length".to_string()));
+            return Err(PoWError::PoolError(
+                "Invalid hash result length".to_string(),
+            ));
         }
 
         if self.miner_id.is_empty() {

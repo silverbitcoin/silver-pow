@@ -1,5 +1,5 @@
 //! WebSocket Server for Real-Time Blockchain Data Streaming
-//! 
+//!
 //! Provides real-time blockchain data to Explorer and other clients
 //! Production-grade implementation with:
 //! - Real-time block updates
@@ -9,14 +9,14 @@
 //! - Automatic reconnection support
 //! - Binary and JSON message support
 
-use std::sync::Arc;
-use tokio::sync::{RwLock, broadcast};
-use tracing::{info, debug, error, warn};
-use serde_json::{json, Value};
 use futures_util::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::Message;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::{broadcast, RwLock};
+use tokio_tungstenite::tungstenite::Message;
+use tracing::{debug, error, info, warn};
 
 /// WebSocket event types for real-time updates
 #[derive(Debug, Clone)]
@@ -103,7 +103,7 @@ impl WebSocketServer {
     /// Create new WebSocket server
     pub fn new(addr: SocketAddr) -> Self {
         let (event_tx, _) = broadcast::channel(1000);
-        
+
         Self {
             event_tx,
             clients: Arc::new(RwLock::new(HashMap::new())),
@@ -149,7 +149,7 @@ impl WebSocketServer {
             miner,
             reward,
         };
-        
+
         let _ = self.event_tx.send(event);
     }
 
@@ -171,7 +171,7 @@ impl WebSocketServer {
             fee,
             timestamp,
         };
-        
+
         let _ = self.event_tx.send(event);
     }
 
@@ -189,7 +189,7 @@ impl WebSocketServer {
             block_height,
             confirmations,
         };
-        
+
         let _ = self.event_tx.send(event);
     }
 
@@ -207,7 +207,7 @@ impl WebSocketServer {
             new_balance,
             timestamp,
         };
-        
+
         let _ = self.event_tx.send(event);
     }
 
@@ -223,7 +223,7 @@ impl WebSocketServer {
             new_difficulty,
             timestamp,
         };
-        
+
         let _ = self.event_tx.send(event);
     }
 
@@ -241,7 +241,7 @@ impl WebSocketServer {
             blocks,
             transactions,
         };
-        
+
         let _ = self.event_tx.send(event);
     }
 }
@@ -298,7 +298,7 @@ async fn handle_connection(
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         debug!("Received message from {}: {}", peer_addr, text);
-                        
+
                         // Parse subscription request
                         if let Ok(request) = serde_json::from_str::<Value>(&text) {
                             if let Some(action) = request.get("action").and_then(|v| v.as_str()) {

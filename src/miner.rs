@@ -105,14 +105,18 @@ impl Miner {
     }
 
     /// Mine a single work package using SHA-512
-    /// This is the real mining loop 
+    /// This is the real mining loop
     pub async fn mine_work(&self, work: WorkPackage) -> Result<Option<WorkProof>> {
         self.mine_work_with_address(work, vec![0u8; 20]).await
     }
 
     /// Mine with a specific miner address - PRODUCTION IMPLEMENTATION
     /// Real SHA-512 mining with proper error handling and no unwrap() calls
-    pub async fn mine_work_with_address(&self, work: WorkPackage, miner_address: Vec<u8>) -> Result<Option<WorkProof>> {
+    pub async fn mine_work_with_address(
+        &self,
+        work: WorkPackage,
+        miner_address: Vec<u8>,
+    ) -> Result<Option<WorkProof>> {
         let target = work.target.clone();
         let header = work.get_header_for_hashing();
         let work_id = work.work_id.clone();
@@ -163,7 +167,8 @@ impl Miner {
                             0
                         }),
                 )
-                .build() {
+                .build()
+                {
                     Ok(p) => p,
                     Err(e) => {
                         error!("Failed to build proof: {}", e);
@@ -215,7 +220,7 @@ impl Miner {
             // Periodically check for new work (every 1M hashes)
             if hashes_since_work_check >= 1_000_000 {
                 hashes_since_work_check = 0;
-                
+
                 if let Some(new_work) = self.get_current_work().await {
                     if new_work.work_id != work.work_id {
                         debug!("Switching to new work package after {} hashes", nonce);
@@ -242,7 +247,10 @@ impl Miner {
             if let Some(work) = self.get_current_work().await {
                 match self.mine_work(work).await {
                     Ok(Some(proof)) => {
-                        debug!("Found proof: chain={}, height={}", proof.chain_id, proof.block_height);
+                        debug!(
+                            "Found proof: chain={}, height={}",
+                            proof.chain_id, proof.block_height
+                        );
                     }
                     Ok(None) => {
                         // Work changed, continue to next iteration

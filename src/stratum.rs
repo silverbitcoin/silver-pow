@@ -1,7 +1,7 @@
 //! Production-grade Stratum protocol implementation for mining pools
 //! Stratum v1 protocol for real mining pool communication
 
-use crate::{PoWError, Result, WorkPackage, calculate_difficulty_bits};
+use crate::{calculate_difficulty_bits, PoWError, Result, WorkPackage};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -152,7 +152,7 @@ impl StratumServer {
     /// Check if IP is rate limited
     async fn is_ip_blocked(&self, ip: IpAddr) -> bool {
         let limits = self.ip_rate_limits.read().await;
-        
+
         if let Some(limit) = limits.get(&ip) {
             if let Some(blocked_until) = limit.blocked_until {
                 if Instant::now() < blocked_until {
@@ -160,7 +160,7 @@ impl StratumServer {
                 }
             }
         }
-        
+
         false
     }
 
@@ -184,7 +184,10 @@ impl StratumServer {
         limit.connection_count += 1;
 
         if limit.connection_count > self.max_connections_per_ip {
-            warn!("IP {} exceeded connection limit ({})", ip, limit.connection_count);
+            warn!(
+                "IP {} exceeded connection limit ({})",
+                ip, limit.connection_count
+            );
             limit.blocked_until = Some(now + self.ip_block_duration);
             return false;
         }
@@ -211,7 +214,7 @@ impl StratumServer {
                     }
 
                     let clients = Arc::clone(&self.clients);
-                    
+
                     // Check connection limit
                     let client_count = clients.read().await.len();
                     if client_count >= self.max_clients {
@@ -219,8 +222,13 @@ impl StratumServer {
                         continue;
                     }
 
-                    info!("New connection from {} (clients: {}/{})", addr, client_count + 1, self.max_clients);
-                    
+                    info!(
+                        "New connection from {} (clients: {}/{})",
+                        addr,
+                        client_count + 1,
+                        self.max_clients
+                    );
+
                     let current_work = Arc::clone(&self.current_work);
                     let difficulty = Arc::clone(&self.difficulty);
                     let client_timeout = self.client_timeout;
@@ -282,7 +290,7 @@ impl StratumServer {
 
         loop {
             line.clear();
-            
+
             // Use timeout for read operations
             match tokio_timeout(client_timeout, reader.read_line(&mut line)).await {
                 Ok(Ok(0)) => {
@@ -302,7 +310,10 @@ impl StratumServer {
 
                     message_count += 1;
                     if message_count > rate_limit {
-                        warn!("Rate limit exceeded for client {} ({})", client_id, remote_addr);
+                        warn!(
+                            "Rate limit exceeded for client {} ({})",
+                            client_id, remote_addr
+                        );
                         break;
                     }
 
@@ -313,79 +324,89 @@ impl StratumServer {
                     }
 
                     match StratumMessage::from_json_line(line) {
-                        Ok(msg) => {
-                            match msg.method.as_str() {
-                                "mining.subscribe" => {
-                                    debug!("Client {} ({}) subscribed", client_id, remote_addr);
+                        Ok(msg) => match msg.method.as_str() {
+                            "mining.subscribe" => {
+                                debug!("Client {} ({}) subscribed", client_id, remote_addr);
+                                let mut clients_map = clients.write().await;
+                                clients_map.insert(
+                                    client_id.clone(),
+                                    StratumClient {
+                                        id: client_id.clone(),
+                                        worker_name: "unknown".to_string(),
+                                        difficulty: 1_000_000,
+                                        subscribed: true,
+                                        authorized: false,
+                                        shares_accepted: 0,
+                                        shares_rejected: 0,
+                                        connected_at: Instant::now(),
+                                        last_activity: Instant::now(),
+                                        remote_addr: Some(remote_addr),
+                                        sender: None,
+                                    },
+                                );
+                            }
+                            "mining.authorize" => {
+                                if msg.params.len() >= 2 {
+                                    let worker_name = msg.params[0].as_str().unwrap_or("unknown");
                                     let mut clients_map = clients.write().await;
-                                    clients_map.insert(
-                                        client_id.clone(),
-                                        StratumClient {
-                                            id: client_id.clone(),
-                                            worker_name: "unknown".to_string(),
-                                            difficulty: 1_000_000,
-                                            subscribed: true,
-                                            authorized: false,
-                                            shares_accepted: 0,
-                                            shares_rejected: 0,
-                                            connected_at: Instant::now(),
-                                            last_activity: Instant::now(),
-                                            remote_addr: Some(remote_addr),
-                                            sender: None,
-                                        },
-                                    );
+                                    if let Some(client) = clients_map.get_mut(&client_id) {
+                                        client.worker_name = worker_name.to_string();
+                                        client.authorized = true;
+                                        client.last_activity = Instant::now();
+                                        debug!(
+                                            "Client {} ({}) authorized as {}",
+                                            client_id, remote_addr, worker_name
+                                        );
+                                    }
                                 }
-                                "mining.authorize" => {
-                                    if msg.params.len() >= 2 {
-                                        let worker_name = msg.params[0].as_str().unwrap_or("unknown");
-                                        let mut clients_map = clients.write().await;
-                                        if let Some(client) = clients_map.get_mut(&client_id) {
-                                            client.worker_name = worker_name.to_string();
-                                            client.authorized = true;
-                                            client.last_activity = Instant::now();
-                                            debug!("Client {} ({}) authorized as {}", client_id, remote_addr, worker_name);
-                                        }
+
+                                let auth_response = json!({
+                                    "id": msg.id,
+                                    "result": true,
+                                    "error": null
+                                });
+                                writer
+                                    .write_all(format!("{}\n", auth_response).as_bytes())
+                                    .await?;
+                            }
+                            "mining.submit" => {
+                                if msg.params.len() >= 5 {
+                                    let nonce = msg.params[2].as_str().unwrap_or("0");
+                                    let nonce = u64::from_str_radix(nonce, 16).unwrap_or(0);
+
+                                    let mut clients_map = clients.write().await;
+                                    if let Some(client) = clients_map.get_mut(&client_id) {
+                                        client.shares_accepted += 1;
+                                        client.last_activity = Instant::now();
                                     }
 
-                                    let auth_response = json!({
+                                    let submit_response = json!({
                                         "id": msg.id,
                                         "result": true,
                                         "error": null
                                     });
                                     writer
-                                        .write_all(format!("{}\n", auth_response).as_bytes())
+                                        .write_all(format!("{}\n", submit_response).as_bytes())
                                         .await?;
-                                }
-                                "mining.submit" => {
-                                    if msg.params.len() >= 5 {
-                                        let nonce = msg.params[2].as_str().unwrap_or("0");
-                                        let nonce = u64::from_str_radix(nonce, 16).unwrap_or(0);
 
-                                        let mut clients_map = clients.write().await;
-                                        if let Some(client) = clients_map.get_mut(&client_id) {
-                                            client.shares_accepted += 1;
-                                            client.last_activity = Instant::now();
-                                        }
-
-                                        let submit_response = json!({
-                                            "id": msg.id,
-                                            "result": true,
-                                            "error": null
-                                        });
-                                        writer
-                                            .write_all(format!("{}\n", submit_response).as_bytes())
-                                            .await?;
-
-                                        debug!("Share submitted by {} ({}) with nonce {}", client_id, remote_addr, nonce);
-                                    }
-                                }
-                                _ => {
-                                    warn!("Unknown method from {} ({}): {}", client_id, remote_addr, msg.method);
+                                    debug!(
+                                        "Share submitted by {} ({}) with nonce {}",
+                                        client_id, remote_addr, nonce
+                                    );
                                 }
                             }
-                        }
+                            _ => {
+                                warn!(
+                                    "Unknown method from {} ({}): {}",
+                                    client_id, remote_addr, msg.method
+                                );
+                            }
+                        },
                         Err(e) => {
-                            error!("Failed to parse message from {} ({}): {}", client_id, remote_addr, e);
+                            error!(
+                                "Failed to parse message from {} ({}): {}",
+                                client_id, remote_addr, e
+                            );
                         }
                     }
                 }
@@ -420,19 +441,20 @@ impl StratumServer {
         let work = self.current_work.read().await;
         if let Some(work) = work.as_ref() {
             let clients = self.clients.read().await;
-            
+
             if clients.is_empty() {
                 debug!("No clients connected for work broadcast");
                 return Ok(());
             }
-            
+
             // REAL IMPLEMENTATION: Calculate difficulty bits from difficulty value
             let difficulty_bits = calculate_difficulty_bits(work.difficulty);
-            
+
             // REAL IMPLEMENTATION: Create job_id with block height for proper validation
             // Format: "height_timestamp_nonce" to allow miners to track which block height they're mining
-            let job_id_with_height = format!("{:x}_{}", work.block_height, hex::encode(&work.work_id));
-            
+            let job_id_with_height =
+                format!("{:x}_{}", work.block_height, hex::encode(&work.work_id));
+
             // Create mining.notify message with work details
             // This is the real Stratum v1 protocol format
             let notify_msg = json!({
@@ -447,10 +469,10 @@ impl StratumServer {
                     false                                  // clean_jobs flag
                 ]
             });
-            
+
             let notify_json = serde_json::to_string(&notify_msg)
                 .map_err(|e| PoWError::PoolError(format!("JSON serialization error: {}", e)))?;
-            
+
             info!(
                 "Broadcasting work to {} clients: chain={}, height={}, difficulty={}, work_id={}",
                 clients.len(),
@@ -459,7 +481,7 @@ impl StratumServer {
                 work.difficulty,
                 hex::encode(&work.work_id[..8])
             );
-            
+
             // PRODUCTION IMPLEMENTATION: Real work broadcast to all connected clients
             // This is a production-grade implementation that:
             // 1. Sends work to each connected client via their TCP connection
@@ -468,24 +490,24 @@ impl StratumServer {
             // 4. Implements retry logic with exponential backoff
             // 5. Validates client state before sending
             // 6. Logs all broadcast events with timestamps
-            
+
             let mut broadcast_count = 0u32;
             let mut failed_count = 0u32;
             let broadcast_start = Instant::now();
             let mut failed_clients = Vec::new();
-            
+
             for (client_id, client) in clients.iter() {
                 // PRODUCTION VALIDATION: Check client state before sending
                 if !client.subscribed {
                     debug!("Skipping unsubscribed client: {}", client_id);
                     continue;
                 }
-                
+
                 if !client.authorized {
                     debug!("Skipping unauthorized client: {}", client_id);
                     continue;
                 }
-                
+
                 // PRODUCTION IMPLEMENTATION: Send work to client via channel
                 // Real implementation with proper error handling
                 if let Some(sender) = &client.sender {
@@ -494,9 +516,12 @@ impl StratumServer {
                             broadcast_count += 1;
                             debug!(
                                 "Work sent to client {} (worker: {}, addr: {:?}, difficulty: {})",
-                                client_id, client.worker_name, client.remote_addr, client.difficulty
+                                client_id,
+                                client.worker_name,
+                                client.remote_addr,
+                                client.difficulty
                             );
-                            
+
                             // Log per-client broadcast details
                             if let Some(addr) = client.remote_addr {
                                 debug!(
@@ -523,14 +548,17 @@ impl StratumServer {
                     warn!("Client {} has no sender channel", client_id);
                 }
             }
-            
+
             let broadcast_duration = broadcast_start.elapsed();
-            
+
             info!(
                 "Work broadcast complete: sent={}, failed={}, total_clients={}, duration={:?}",
-                broadcast_count, failed_count, clients.len(), broadcast_duration
+                broadcast_count,
+                failed_count,
+                clients.len(),
+                broadcast_duration
             );
-            
+
             // PRODUCTION METRICS: Track broadcast statistics
             if broadcast_count > 0 {
                 let avg_latency_ms = broadcast_duration.as_millis() as u64 / broadcast_count as u64;
@@ -540,7 +568,7 @@ impl StratumServer {
                     (broadcast_count as f64 / clients.len() as f64) * 100.0
                 );
             }
-            
+
             // PRODUCTION ERROR HANDLING: Log failed clients for monitoring
             if !failed_clients.is_empty() {
                 warn!(
@@ -549,12 +577,13 @@ impl StratumServer {
                     failed_clients
                 );
             }
-            
+
             // PRODUCTION ERROR HANDLING: Return error if all broadcasts failed
             if broadcast_count == 0 && !clients.is_empty() {
-                return Err(PoWError::PoolError(
-                    format!("Failed to broadcast work to any of {} clients", clients.len())
-                ));
+                return Err(PoWError::PoolError(format!(
+                    "Failed to broadcast work to any of {} clients",
+                    clients.len()
+                )));
             }
         }
         Ok(())

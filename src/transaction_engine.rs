@@ -3,11 +3,11 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
+use silver_core::MIST_PER_SLVR;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
-use silver_core::MIST_PER_SLVR;
 
 /// UTXO (Unspent Transaction Output) entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,37 +48,41 @@ impl UTXOSet {
     /// Add UTXO to the set
     pub async fn add_utxo(&self, utxo: UTXOEntry) -> Result<(), String> {
         let key = format!("{}:{}", utxo.tx_hash, utxo.output_index);
-        
+
         // Validate UTXO
         if utxo.amount == 0 {
             return Err("UTXO amount must be greater than zero".to_string());
         }
-        
+
         if utxo.tx_hash.len() != 128 {
             return Err("Invalid transaction hash length".to_string());
         }
-        
+
         if hex::decode(&utxo.tx_hash).is_err() {
             return Err("Invalid transaction hash format".to_string());
         }
-        
+
         // Add to UTXO set
         let mut utxos = self.utxos.write().await;
         utxos.insert(key.clone(), utxo.clone());
-        
+
         // Add to address index
         let mut addr_utxos = self.address_utxos.write().await;
         addr_utxos
             .entry(utxo.recipient.clone())
             .or_insert_with(Vec::new)
             .push(key);
-        
+
         debug!("Added UTXO: {} (amount: {})", utxo.tx_hash, utxo.amount);
         Ok(())
     }
 
     /// Get UTXO by transaction hash and output index
-    pub async fn get_utxo(&self, tx_hash: &str, output_index: u32) -> Result<Option<UTXOEntry>, String> {
+    pub async fn get_utxo(
+        &self,
+        tx_hash: &str,
+        output_index: u32,
+    ) -> Result<Option<UTXOEntry>, String> {
         let key = format!("{}:{}", tx_hash, output_index);
         let utxos = self.utxos.read().await;
         Ok(utxos.get(&key).cloned())
@@ -88,7 +92,7 @@ impl UTXOSet {
     pub async fn spend_utxo(&self, tx_hash: &str, output_index: u32) -> Result<(), String> {
         let key = format!("{}:{}", tx_hash, output_index);
         let mut utxos = self.utxos.write().await;
-        
+
         if let Some(utxo) = utxos.get_mut(&key) {
             if utxo.spent {
                 return Err(format!("UTXO already spent: {}", key));
@@ -105,7 +109,7 @@ impl UTXOSet {
     pub async fn get_address_utxos(&self, address: &str) -> Result<Vec<UTXOEntry>, String> {
         let addr_utxos = self.address_utxos.read().await;
         let utxos = self.utxos.read().await;
-        
+
         if let Some(keys) = addr_utxos.get(address) {
             let mut result = Vec::new();
             for key in keys {
@@ -263,26 +267,26 @@ impl Transaction {
         // PRODUCTION IMPLEMENTATION: Real UTXO set lookup with full validation
         // This is a production-grade implementation that validates each input
         // against the actual UTXO database
-        
+
         let mut total = 0u128;
         const MAX_SUPPLY_SLVR: u64 = 21_000_000; // 21M SLVR
         let max_supply = (MAX_SUPPLY_SLVR as u128) * (MIST_PER_SLVR as u128);
-        
+
         for (i, input) in self.inputs.iter().enumerate() {
             // PRODUCTION IMPLEMENTATION: Real UTXO validation
             // Each input must reference a valid, unspent transaction output
-            
+
             // 1. Validate input structure
             if input.prev_tx_hash.is_empty() {
                 tracing::warn!("Invalid input {}: empty previous transaction hash", i);
                 continue;
             }
-            
+
             if input.signature.is_empty() {
                 tracing::warn!("Invalid input {}: empty signature", i);
                 continue;
             }
-            
+
             // 2. Validate previous transaction hash format (should be 128 hex chars for SHA-512)
             if input.prev_tx_hash.len() != 128 {
                 tracing::warn!(
@@ -292,13 +296,16 @@ impl Transaction {
                 );
                 continue;
             }
-            
+
             // 3. Verify hash is valid hex
             if hex::decode(&input.prev_tx_hash).is_err() {
-                tracing::warn!("Invalid input {}: previous transaction hash is not valid hex", i);
+                tracing::warn!(
+                    "Invalid input {}: previous transaction hash is not valid hex",
+                    i
+                );
                 continue;
             }
-            
+
             // 4. PRODUCTION: Query UTXO database for this output
             // Real UTXO lookup from ParityDB:
             // - Look up the UTXO set (stored in ParityDB)
@@ -306,26 +313,26 @@ impl Transaction {
             // - Verify the UTXO exists and hasn't been spent
             // - Get the amount from the UTXO
             // - Verify the amount is valid
-            
+
             // REAL CALCULATION: Derive amount from input index and transaction structure
             // Most real transactions have inputs of similar sizes
             let base_amount = MIST_PER_SLVR as u128; // 1 SLVR in MIST
-            
+
             // Calculate realistic input amount
             let input_amount = match i {
-                0 => base_amount,                           // First input: 1 SLVR
-                1 => base_amount.saturating_mul(2),         // Second input: 2 SLVR
-                2 => base_amount.saturating_mul(5),         // Third input: 5 SLVR
-                3 => base_amount.saturating_mul(10),        // Fourth input: 10 SLVR
+                0 => base_amount,                                 // First input: 1 SLVR
+                1 => base_amount.saturating_mul(2),               // Second input: 2 SLVR
+                2 => base_amount.saturating_mul(5),               // Third input: 5 SLVR
+                3 => base_amount.saturating_mul(10),              // Fourth input: 10 SLVR
                 _ => base_amount.saturating_mul((i as u128) + 1), // Subsequent: (i+1) SLVR
             };
-            
+
             // 5. Validate input amount
             if input_amount == 0 {
                 tracing::warn!("Invalid input {}: amount is zero", i);
                 continue;
             }
-            
+
             if input_amount > max_supply {
                 tracing::warn!(
                     "Invalid input {}: amount {} exceeds max supply {}",
@@ -335,7 +342,7 @@ impl Transaction {
                 );
                 continue;
             }
-            
+
             // 6. Verify signature format (should be variable length for 512-bit schemes)
             // Secp512r1: 132 hex chars (66 bytes)
             // SPHINCS+: 128 hex chars (64 bytes)
@@ -349,16 +356,16 @@ impl Transaction {
                 );
                 continue;
             }
-            
+
             // 7. Verify signature is valid hex
             if hex::decode(&input.signature).is_err() {
                 tracing::warn!("Invalid input {}: signature is not valid hex", i);
                 continue;
             }
-            
+
             // 8. Add to total with overflow protection
             total = total.saturating_add(input_amount);
-            
+
             tracing::debug!(
                 "Input {}: {} satoshis (prev_tx: {}, output_index: {})",
                 i,
@@ -367,7 +374,7 @@ impl Transaction {
                 input.output_index
             );
         }
-        
+
         tracing::debug!("Total input amount: {} satoshis", total);
         total
     }
@@ -428,14 +435,17 @@ impl Transaction {
         // 2. UTXO hasn't been spent
         // 3. Amount is correct
         // 4. Signature is valid
-        
+
         let mut total_input = 0u128;
         const MAX_SUPPLY_SLVR: u64 = 21_000_000; // 21M SLVR
         let max_supply = (MAX_SUPPLY_SLVR as u128) * (MIST_PER_SLVR as u128);
 
         for (i, input) in self.inputs.iter().enumerate() {
             // PRODUCTION: Look up UTXO in the database
-            match utxo_set.get_utxo(&input.prev_tx_hash, input.output_index).await {
+            match utxo_set
+                .get_utxo(&input.prev_tx_hash, input.output_index)
+                .await
+            {
                 Ok(Some(utxo)) => {
                     // PRODUCTION: Verify UTXO hasn't been spent
                     if utxo.spent {
@@ -472,15 +482,13 @@ impl Transaction {
                     if input.signature.len() != 128 {
                         return Err(format!(
                             "Input {}: Invalid signature length {} (expected 128)",
-                            i, input.signature.len()
+                            i,
+                            input.signature.len()
                         ));
                     }
 
                     if hex::decode(&input.signature).is_err() {
-                        return Err(format!(
-                            "Input {}: Signature is not valid hex",
-                            i
-                        ));
+                        return Err(format!("Input {}: Signature is not valid hex", i));
                     }
 
                     // PRODUCTION: Add to total with overflow protection
@@ -501,10 +509,7 @@ impl Transaction {
                     ));
                 }
                 Err(e) => {
-                    return Err(format!(
-                        "Input {}: Failed to look up UTXO: {}",
-                        i, e
-                    ));
+                    return Err(format!("Input {}: Failed to look up UTXO: {}", i, e));
                 }
             }
         }
@@ -660,7 +665,10 @@ impl TransactionEngine {
     }
 
     /// Execute transaction
-    pub async fn execute_transaction(&self, tx_hash: &str) -> Result<TransactionExecutionResult, String> {
+    pub async fn execute_transaction(
+        &self,
+        tx_hash: &str,
+    ) -> Result<TransactionExecutionResult, String> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -749,17 +757,17 @@ impl TransactionEngine {
         // - Per byte of data: 4 gas (zero bytes) or 16 gas (non-zero bytes)
         // - Per input: 375 gas
         // - Per output: 375 gas
-        
+
         const BASE_GAS: u64 = 21_000;
         const GAS_PER_ZERO_BYTE: u64 = 4;
         const GAS_PER_NONZERO_BYTE: u64 = 16;
         const GAS_PER_INPUT: u64 = 375;
         const GAS_PER_OUTPUT: u64 = 375;
-        
+
         // Calculate transaction size in bytes (real serialization)
         let tx_bytes = serde_json::to_vec(tx).unwrap_or_default();
         let _tx_size = tx_bytes.len() as u64;
-        
+
         // Count zero and non-zero bytes
         let mut zero_bytes = 0u64;
         let mut nonzero_bytes = 0u64;
@@ -770,16 +778,18 @@ impl TransactionEngine {
                 nonzero_bytes += 1;
             }
         }
-        
+
         // Calculate total gas
         let data_gas = (zero_bytes * GAS_PER_ZERO_BYTE) + (nonzero_bytes * GAS_PER_NONZERO_BYTE);
         let input_gas = (tx.inputs.len() as u64) * GAS_PER_INPUT;
         let output_gas = (tx.outputs.len() as u64) * GAS_PER_OUTPUT;
-        
+
         let gas_used = BASE_GAS + data_gas + input_gas + output_gas;
 
-        debug!("Transaction executed: gas_used={} (base={}, data={}, inputs={}, outputs={})", 
-            gas_used, BASE_GAS, data_gas, input_gas, output_gas);
+        debug!(
+            "Transaction executed: gas_used={} (base={}, data={}, inputs={}, outputs={})",
+            gas_used, BASE_GAS, data_gas, input_gas, output_gas
+        );
         Ok(gas_used)
     }
 
@@ -831,7 +841,10 @@ impl TransactionEngine {
             total_transactions,
             mempool_size: mempool.len(),
             executed_transactions: executed.len(),
-            failed_transactions: executed.iter().filter(|e| e.status == TransactionStatus::Failed).count(),
+            failed_transactions: executed
+                .iter()
+                .filter(|e| e.status == TransactionStatus::Failed)
+                .count(),
         }
     }
 
@@ -843,7 +856,11 @@ impl TransactionEngine {
 
     /// PRODUCTION IMPLEMENTATION: Get UTXO from the set
     /// Real UTXO lookup
-    pub async fn get_utxo(&self, tx_hash: &str, output_index: u32) -> Result<Option<UTXOEntry>, String> {
+    pub async fn get_utxo(
+        &self,
+        tx_hash: &str,
+        output_index: u32,
+    ) -> Result<Option<UTXOEntry>, String> {
         self.utxo_set.get_utxo(tx_hash, output_index).await
     }
 
@@ -930,13 +947,13 @@ mod tests {
         let tx = Transaction::new(
             "sender_address".to_string(),
             vec![TransactionInput {
-                prev_tx_hash: "a".repeat(128),  // 128 hex chars = 64 bytes SHA-512
+                prev_tx_hash: "a".repeat(128), // 128 hex chars = 64 bytes SHA-512
                 output_index: 0,
-                signature: "c".repeat(128),    // 128 hex chars = 64 bytes (valid 512-bit signature)
+                signature: "c".repeat(128), // 128 hex chars = 64 bytes (valid 512-bit signature)
             }],
             vec![TransactionOutput {
                 recipient: "recipient_address".to_string(),
-                amount: 100_000_000,  // 1 SLVR in MIST
+                amount: 100_000_000, // 1 SLVR in MIST
             }],
             10000,
         )
@@ -954,13 +971,13 @@ mod tests {
         let _tx = Transaction::new(
             "sender_address".to_string(),
             vec![TransactionInput {
-                prev_tx_hash: "b".repeat(128),  // 128 hex chars = 64 bytes SHA-512
+                prev_tx_hash: "b".repeat(128), // 128 hex chars = 64 bytes SHA-512
                 output_index: 0,
-                signature: "d".repeat(128),    // 128 hex chars = 64 bytes (valid 512-bit signature)
+                signature: "d".repeat(128), // 128 hex chars = 64 bytes (valid 512-bit signature)
             }],
             vec![TransactionOutput {
                 recipient: "recipient_address".to_string(),
-                amount: 100_000_000,  // 1 SLVR in MIST
+                amount: 100_000_000, // 1 SLVR in MIST
             }],
             10000,
         )

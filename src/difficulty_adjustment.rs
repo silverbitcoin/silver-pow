@@ -117,7 +117,10 @@ impl DifficultyAdjustmentManager {
             times.pop_front();
         }
 
-        debug!("Recorded block time: height={}, timestamp={}", height, timestamp);
+        debug!(
+            "Recorded block time: height={}, timestamp={}",
+            height, timestamp
+        );
     }
 
     /// Calculate new difficulty based on block times

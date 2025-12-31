@@ -2,6 +2,7 @@
 //! Implements Stratum protocol v1 with real share validation and block submission
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha512};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -10,8 +11,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use sha2::{Sha512, Digest};
-use hex;
 
 /// Helper to compute SHA-512 hash
 fn compute_sha512(data: &[u8]) -> String {
@@ -149,7 +148,7 @@ impl PoolState {
                         if let Some(result) = json.get("result") {
                             if let Some(height) = result.as_u64() {
                                 info!("Synced block height from node: {}", height);
-                                
+
                                 // Update work with next block height
                                 let mut work = self.current_work.write().await;
                                 work.height = height + 1;
@@ -158,7 +157,7 @@ impl PoolState {
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap_or_default()
                                     .as_secs();
-                                
+
                                 info!("Pool work updated to height: {}", work.height);
                                 return Ok(height);
                             }
@@ -256,8 +255,13 @@ impl PoolState {
                         if let Some(result) = json.get("result") {
                             if let Some(hash) = result.as_str() {
                                 // Validate hash format (128 hex chars for SHA-512)
-                                if hash.len() == 128 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
-                                    info!("Retrieved previous block hash for height {}: {}", height - 1, hash);
+                                if hash.len() == 128 && hash.chars().all(|c| c.is_ascii_hexdigit())
+                                {
+                                    info!(
+                                        "Retrieved previous block hash for height {}: {}",
+                                        height - 1,
+                                        hash
+                                    );
                                     return Ok(hash.to_string());
                                 } else {
                                     error!("Invalid hash format from node: {}", hash);
@@ -352,7 +356,7 @@ impl PoolState {
         work.header = header;
         work.target = target;
         work.height = height;
-        
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -380,7 +384,9 @@ impl PoolState {
         miner.shares += 1;
 
         // Validate share difficulty
-        let is_valid = self.validate_share_difficulty(&hash, miner.difficulty).await;
+        let is_valid = self
+            .validate_share_difficulty(&hash, miner.difficulty)
+            .await;
 
         if is_valid {
             miner.valid_shares += 1;
@@ -429,10 +435,13 @@ impl PoolState {
             Ok(hash_bytes) => {
                 // SHA-512 produces 64 bytes
                 if hash_bytes.len() != 64 {
-                    warn!("Hash invalid length: {} bytes (need 64 for SHA-512)", hash_bytes.len());
+                    warn!(
+                        "Hash invalid length: {} bytes (need 64 for SHA-512)",
+                        hash_bytes.len()
+                    );
                     return false;
                 }
-                
+
                 // For SHA-512, calculate target from difficulty
                 // The difficulty value represents how many times harder it is than difficulty 1
                 // difficulty 1 = target with 0 leading zero bytes (all 0xFF)
@@ -441,25 +450,25 @@ impl PoolState {
                 // difficulty 65536 = target with ~16 leading zero bits (2 bytes)
                 // difficulty 16777216 = target with ~24 leading zero bits (3 bytes)
                 // difficulty 4294967296 = target with ~32 leading zero bits (4 bytes)
-                
+
                 if difficulty == 0 {
                     return false;
                 }
-                
+
                 // Calculate leading zero BITS needed: log2(difficulty)
                 let log2_difficulty = (difficulty as f64).log2();
                 let leading_zero_bits = log2_difficulty as u32;
                 let leading_zero_bytes = (leading_zero_bits / 8) as usize;
                 let remaining_bits = leading_zero_bits % 8;
-                
+
                 // Build target: leading_zero_bytes of 0x00, then a partial byte if needed, then 0xFF for the rest
                 let mut target_bytes = [0xFFu8; 64];
-                
+
                 // Set leading zero bytes
-                for i in 0..leading_zero_bytes.min(64) {
-                    target_bytes[i] = 0x00;
+                for target_byte in target_bytes.iter_mut().take(leading_zero_bytes.min(64)) {
+                    *target_byte = 0x00;
                 }
-                
+
                 // Set partial byte if there are remaining bits
                 if remaining_bits > 0 && leading_zero_bytes < 64 {
                     // Create a mask for the remaining bits
@@ -467,21 +476,25 @@ impl PoolState {
                     let mask = (1u8 << (8 - remaining_bits)) - 1;
                     target_bytes[leading_zero_bytes] = mask;
                 }
-                
+
                 // Compare hash against target (both as big-endian byte arrays)
                 // Hash must be less than or equal to target to be valid
                 let is_valid = hash_bytes.as_slice() <= target_bytes.as_slice();
-                
+
                 if !is_valid {
-                    debug!("Share validation FAILED: difficulty={}, leading_zero_bits={}", 
-                        difficulty, leading_zero_bits);
-                    debug!("Hash: {}", hex::encode(&hash_bytes));
-                    debug!("Target: {}", hex::encode(&target_bytes));
+                    debug!(
+                        "Share validation FAILED: difficulty={}, leading_zero_bits={}",
+                        difficulty, leading_zero_bits
+                    );
+                    debug!("Hash: {}", hex::encode(hash_bytes));
+                    debug!("Target: {}", hex::encode(target_bytes));
                 }
-                
-                debug!("Share validation: difficulty={}, leading_zero_bits={}, valid={}", 
-                    difficulty, leading_zero_bits, is_valid);
-                
+
+                debug!(
+                    "Share validation: difficulty={}, leading_zero_bits={}, valid={}",
+                    difficulty, leading_zero_bits, is_valid
+                );
+
                 is_valid
             }
             Err(e) => {
@@ -499,14 +512,20 @@ impl PoolState {
         let hash_bytes = match hex::decode(hash) {
             Ok(bytes) => bytes,
             Err(e) => {
-                warn!("Failed to decode hash for block check: {} (error: {})", hash, e);
+                warn!(
+                    "Failed to decode hash for block check: {} (error: {})",
+                    hash, e
+                );
                 return false;
             }
         };
 
         // SHA-512 produces exactly 64 bytes
         if hash_bytes.len() != 64 {
-            warn!("Invalid hash length: expected 64 bytes, got {}", hash_bytes.len());
+            warn!(
+                "Invalid hash length: expected 64 bytes, got {}",
+                hash_bytes.len()
+            );
             return false;
         }
 
@@ -537,12 +556,12 @@ impl PoolState {
 
         // Build target: leading_zero_bytes of 0x00, then a partial byte if needed, then 0xFF for the rest (64 bytes total)
         let mut target_bytes = [0xFFu8; 64];
-        
+
         // Set leading zero bytes
-        for i in 0..leading_zero_bytes.min(64) {
-            target_bytes[i] = 0x00;
+        for target_byte in target_bytes.iter_mut().take(leading_zero_bytes.min(64)) {
+            *target_byte = 0x00;
         }
-        
+
         // Set partial byte if there are remaining bits
         if remaining_bits > 0 && leading_zero_bytes < 64 {
             // Create a mask for the remaining bits
@@ -569,7 +588,7 @@ impl PoolState {
         // REAL VALIDATION: Validate hash format
         let hash_bytes = hex::decode(hash)
             .map_err(|e| format!("Invalid hash format: {} (error: {})", hash, e))?;
-        
+
         if hash_bytes.len() != 64 {
             return Err(format!(
                 "Invalid hash length: expected 64 bytes, got {}",
@@ -588,8 +607,14 @@ impl PoolState {
         // REAL IMPLEMENTATION: Extract nonce from hash (last 8 bytes as u64)
         let nonce_bytes = &hash_bytes[hash_bytes.len() - 8..];
         let nonce = u64::from_le_bytes([
-            nonce_bytes[0], nonce_bytes[1], nonce_bytes[2], nonce_bytes[3],
-            nonce_bytes[4], nonce_bytes[5], nonce_bytes[6], nonce_bytes[7],
+            nonce_bytes[0],
+            nonce_bytes[1],
+            nonce_bytes[2],
+            nonce_bytes[3],
+            nonce_bytes[4],
+            nonce_bytes[5],
+            nonce_bytes[6],
+            nonce_bytes[7],
         ]);
 
         // REAL VALIDATION: Nonce cannot be zero
@@ -601,7 +626,7 @@ impl PoolState {
         let work = self.current_work.read().await;
         let block_height = work.height;
         drop(work); // Release the read lock
-        
+
         // REAL IMPLEMENTATION: Get current network difficulty from node
         // This ensures we send the correct difficulty_bits that the node expects
         let network_difficulty = match self.get_current_difficulty_from_node().await {
@@ -631,31 +656,32 @@ impl PoolState {
             } else {
                 // Use Bitcoin's standard max target (difficulty 1)
                 const MAX_TARGET_BITS: u32 = 0x1d00ffff;
-                let max_exponent = (MAX_TARGET_BITS >> 24) as u32;
+                let max_exponent = MAX_TARGET_BITS >> 24;
                 let max_mantissa = MAX_TARGET_BITS & 0xFFFFFF;
-                
+
                 // Calculate log2 of max target
                 // max_target = 0x00000000FFFF0000000000000000000000000000000000000000000000000000
                 // exponent = 0x1d = 29, mantissa = 0x00ffff
                 // log2(max_target) = (29-3)*8 + log2(0x00ffff) ≈ 208 + 15.99 ≈ 224
-                let log2_max_target = (max_exponent as f64 - 3.0) * 8.0 + (max_mantissa as f64).log2();
-                
+                let log2_max_target =
+                    (max_exponent as f64 - 3.0) * 8.0 + (max_mantissa as f64).log2();
+
                 // Calculate log2 of difficulty
                 let log2_difficulty = (difficulty as f64).log2();
-                
+
                 // Calculate log2 of target: log2(target) = log2(max_target) - log2(difficulty)
                 let log2_target = log2_max_target - log2_difficulty;
-                
+
                 // Calculate exponent: exponent = ceil((log2_target - 23) / 8) + 3
                 // This ensures mantissa is in range [0x800000, 0xffffff]
                 let exponent_f64 = ((log2_target - 23.0) / 8.0).ceil() + 3.0;
                 let exponent = exponent_f64.clamp(3.0, 30.0) as u32;
-                
+
                 // Calculate mantissa: mantissa = 2^(log2_target - 8*(exponent-3))
                 let mantissa_bits = log2_target - 8.0 * (exponent as f64 - 3.0);
                 let mantissa_f64 = 2.0_f64.powf(mantissa_bits);
                 let mantissa = (mantissa_f64 as u32).clamp(1, 0xFFFFFF);
-                
+
                 // Encode as bits: (exponent << 24) | mantissa
                 ((exponent & 0xFF) << 24) | (mantissa & 0xFFFFFF)
             }
@@ -671,17 +697,20 @@ impl PoolState {
         // The node expects a serialized block hex string, not a JSON object
         // Block format: version (4) + prev_hash (32) + merkle_root (32) + timestamp (4) + bits (4) + nonce (8) + miner_addr + reward + fees = variable length
         let mut block_hex = String::new();
-        
+
         // Version (4 bytes, little-endian)
         block_hex.push_str(&format!("{:08x}", 1u32));
-        
+
         // Previous block hash (32 bytes) - REAL IMPLEMENTATION: Query actual previous block hash from blockchain
         // This queries the node RPC to get the real previous block hash
         let prev_hash = match self.get_previous_block_hash(block_height).await {
             Ok(hash) => {
-                info!("Retrieved real previous block hash from blockchain: {}", hash);
+                info!(
+                    "Retrieved real previous block hash from blockchain: {}",
+                    hash
+                );
                 hash
-            },
+            }
             Err(e) => {
                 error!("Failed to get previous block hash: {}", e);
                 // Fallback: compute from height (should not happen in production)
@@ -689,7 +718,7 @@ impl PoolState {
             }
         };
         block_hex.push_str(&prev_hash);
-        
+
         // Merkle root (32 bytes) - use the hash directly (it's already a hex string)
         // Ensure it's exactly 64 characters (32 bytes in hex)
         let merkle_root = if hash.len() >= 64 {
@@ -698,29 +727,29 @@ impl PoolState {
             format!("{:0>64}", hash)
         };
         block_hex.push_str(&merkle_root);
-        
+
         // Timestamp (4 bytes, little-endian)
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as u32;
         block_hex.push_str(&format!("{:08x}", timestamp));
-        
+
         // Bits/Difficulty (4 bytes, little-endian)
         block_hex.push_str(&format!("{:08x}", difficulty_bits));
-        
+
         // Nonce (8 bytes, little-endian)
         block_hex.push_str(&format!("{:016x}", nonce));
-        
+
         // Miner address (variable length, encoded as hex)
         block_hex.push_str(&hex::encode(miner_address.as_bytes()));
-        
+
         // Reward (8 bytes, little-endian)
         block_hex.push_str(&format!("{:016x}", block_reward));
-        
+
         // Transaction fees (8 bytes, little-endian)
         block_hex.push_str(&format!("{:016x}", TRANSACTION_FEES));
-        
+
         // Create the RPC request with block hex as parameter
         let block_submission = json!({
             "jsonrpc": "2.0",
@@ -763,13 +792,13 @@ impl PoolState {
                         // Check for JSON-RPC error
                         if let Some(error) = result.get("error") {
                             if !error.is_null() {
-                                let error_code = error.get("code")
-                                    .and_then(|v| v.as_i64())
-                                    .unwrap_or(-1);
-                                let error_msg = error.get("message")
+                                let error_code =
+                                    error.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
+                                let error_msg = error
+                                    .get("message")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("Unknown error");
-                                
+
                                 return Err(format!(
                                     "Node rejected block (code {}): {}",
                                     error_code, error_msg
@@ -781,92 +810,94 @@ impl PoolState {
                         if let Some(result_obj) = result.get("result") {
                             if result_obj.is_null() {
                                 // Null result means success in JSON-RPC
-                                info!(
-                                    "✅ Block #{} ACCEPTED by node",
-                                    block_height
-                                );
+                                info!("✅ Block #{} ACCEPTED by node", block_height);
                                 info!("   Hash: {}", hash);
                                 info!("   Miner: {}", miner_address);
                                 info!("   Nonce: {}", nonce);
-                                
+
                                 // CRITICAL FIX: Sync block height immediately after successful submission
                                 info!("Syncing block height immediately after successful block submission...");
                                 match self.sync_block_height_from_node().await {
                                     Ok(new_height) => {
-                                        info!("✓ Block height synced to: {} (was: {})", new_height, block_height);
+                                        info!(
+                                            "✓ Block height synced to: {} (was: {})",
+                                            new_height, block_height
+                                        );
                                     }
                                     Err(e) => {
-                                        warn!("Failed to sync block height after submission: {}", e);
+                                        warn!(
+                                            "Failed to sync block height after submission: {}",
+                                            e
+                                        );
                                     }
                                 }
-                                
+
                                 return Ok(());
                             } else if let Some(status_str) = result_obj.as_str() {
                                 if status_str == "accepted" || status_str == "success" {
-                                    info!(
-                                        "✅ Block #{} ACCEPTED by node",
-                                        block_height
-                                    );
+                                    info!("✅ Block #{} ACCEPTED by node", block_height);
                                     info!("   Hash: {}", hash);
                                     info!("   Miner: {}", miner_address);
                                     info!("   Nonce: {}", nonce);
-                                    
+
                                     // CRITICAL FIX: Sync block height immediately after successful submission
                                     info!("Syncing block height immediately after successful block submission...");
                                     match self.sync_block_height_from_node().await {
                                         Ok(new_height) => {
-                                            info!("✓ Block height synced to: {} (was: {})", new_height, block_height);
+                                            info!(
+                                                "✓ Block height synced to: {} (was: {})",
+                                                new_height, block_height
+                                            );
                                         }
                                         Err(e) => {
-                                            warn!("Failed to sync block height after submission: {}", e);
+                                            warn!(
+                                                "Failed to sync block height after submission: {}",
+                                                e
+                                            );
                                         }
                                     }
-                                    
+
                                     return Ok(());
                                 }
                             }
                         }
 
                         // If we get here, response was successful but unclear
-                        info!(
-                            "Block #{} submitted, response: {}",
-                            block_height, result
-                        );
-                        
+                        info!("Block #{} submitted, response: {}", block_height, result);
+
                         // CRITICAL FIX: Sync block height immediately after successful submission
                         // This prevents race conditions where multiple blocks at the same height are submitted
-                        info!("Syncing block height immediately after successful block submission...");
+                        info!(
+                            "Syncing block height immediately after successful block submission..."
+                        );
                         match self.sync_block_height_from_node().await {
                             Ok(new_height) => {
-                                info!("✓ Block height synced to: {} (was: {})", new_height, block_height);
+                                info!(
+                                    "✓ Block height synced to: {} (was: {})",
+                                    new_height, block_height
+                                );
                             }
                             Err(e) => {
                                 warn!("Failed to sync block height after submission: {}", e);
                             }
                         }
-                        
+
                         Ok(())
                     }
-                    Err(e) => {
-                        Err(format!(
-                            "Failed to parse node response: {} (response body may not be JSON)",
-                            e
-                        ))
-                    }
+                    Err(e) => Err(format!(
+                        "Failed to parse node response: {} (response body may not be JSON)",
+                        e
+                    )),
                 }
             }
-            Ok(Err(e)) => {
-                Err(format!(
-                    "RPC request to node failed: {} (check if node is running at {})",
-                    e, self.config.node_rpc_url
-                ))
-            }
-            Err(_) => {
-                Err(format!(
-                    "RPC request timeout (30 seconds) - node at {} is not responding",
-                    self.config.node_rpc_url
-                ))
-            }
+            Ok(Err(e)) => Err(format!(
+                "RPC request to node failed: {} (check if node is running at {})",
+                e, self.config.node_rpc_url
+            )),
+            Err(_) => Err(format!(
+                "RPC request timeout (30 seconds) - node at {} is not responding",
+                self.config.node_rpc_url
+            )),
         }
     }
 
@@ -892,12 +923,12 @@ impl PoolState {
             pool_difficulty: self.config.pool_difficulty,
         }
     }
-    
+
     /// REAL IMPLEMENTATION: Convert difficulty value to difficulty bits (compact format)
     /// For SHA-512 (512-bit hashes), we use the proper formula:
     /// difficulty = max_target / current_target
     /// Therefore: current_target = max_target / difficulty
-    /// 
+    ///
     /// For SHA-512, max_target = 2^512 - 1 (all bits set)
     /// We represent this as: max_target = 0xFFFFFFFF... (64 bytes of 0xFF)
     #[allow(dead_code)]
@@ -905,42 +936,41 @@ impl PoolState {
         if difficulty == 0 {
             return 0;
         }
-        
+
         // For SHA-512 (512-bit), the max_target is 2^512 - 1
         // In compact format for 512-bit: exponent = 64 (all 64 bytes used), mantissa = 0xFFFFFF
         // But we need to use a format compatible with the validation logic
-        
+
         // For simplicity and compatibility, we use a direct approach:
         // Calculate how many leading zero bytes the target should have
         // leading_zeros = log2(difficulty) / 8
-        
+
         if difficulty == 1 {
             // Difficulty 1: target = 2^512 - 1 (no leading zeros)
             // Represented as: exponent = 64, mantissa = 0xFFFFFF
             // But in compact format: 0x20FFFFFF (32 bytes of data)
             return 0x20FFFFFF;
         }
-        
+
         // For difficulty > 1, calculate the target
         // target = (2^512 - 1) / difficulty
         // In terms of leading zeros: leading_zeros ≈ log2(difficulty) / 8
-        
+
         let log2_difficulty = (difficulty as f64).log2();
         let leading_zero_bytes = (log2_difficulty / 8.0).floor() as u32;
-        
+
         // The exponent represents how many bytes of data we have
         // exponent = 64 - leading_zero_bytes
         let exponent = 64u32.saturating_sub(leading_zero_bytes);
-        
+
         // For the mantissa, we use 0xFFFFFF (maximum value for 3 bytes)
         // This represents the significant bits after the leading zeros
         let mantissa = 0xFFFFFFu32;
-        
+
         // Encode as bits: (exponent << 24) | mantissa
         ((exponent & 0xFF) << 24) | (mantissa & 0xFFFFFF)
     }
 }
-
 
 /// Pool statistics
 #[derive(Debug, Clone, serde::Serialize)]
@@ -1012,12 +1042,12 @@ pub async fn start_pool(config: PoolConfig) -> Result<(), Box<dyn std::error::Er
 /// Start HTTP server for work updates
 async fn start_http_server(pool_state: Arc<PoolState>) -> Result<(), Box<dyn std::error::Error>> {
     use std::net::SocketAddr;
-    
+
     let addr: SocketAddr = "0.0.0.0:8334".parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    
+
     info!("HTTP work server listening on {}", addr);
-    
+
     loop {
         match listener.accept().await {
             Ok((socket, peer_addr)) => {
@@ -1042,43 +1072,35 @@ async fn handle_http_request(
     pool_state: Arc<PoolState>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    
+
     let mut socket = socket;
     let mut buffer = vec![0; 4096];
-    
+
     match socket.read(&mut buffer).await {
         Ok(0) => return Ok(()),
         Ok(n) => {
             let request = String::from_utf8_lossy(&buffer[..n]);
-            
+
             // Parse HTTP request
             if request.starts_with("POST /update_work") {
                 // Extract JSON body
                 if let Some(body_start) = request.find("\r\n\r\n") {
                     let body = &request[body_start + 4..];
-                    
+
                     // Parse JSON
                     match serde_json::from_str::<serde_json::Value>(body) {
                         Ok(json) => {
-                            let header = json.get("header")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("0");
-                            let target = json.get("target")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("0");
-                            let height = json.get("height")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(1);
-                            
+                            let header = json.get("header").and_then(|v| v.as_str()).unwrap_or("0");
+                            let target = json.get("target").and_then(|v| v.as_str()).unwrap_or("0");
+                            let height = json.get("height").and_then(|v| v.as_u64()).unwrap_or(1);
+
                             // Update pool work
-                            pool_state.update_work(
-                                header.to_string(),
-                                target.to_string(),
-                                height,
-                            ).await;
-                            
+                            pool_state
+                                .update_work(header.to_string(), target.to_string(), height)
+                                .await;
+
                             info!("Work updated via HTTP: height={}", height);
-                            
+
                             // Send HTTP response
                             let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 18\r\n\r\n{\"status\":\"ok\"}";
                             socket.write_all(response.as_bytes()).await?;
@@ -1112,7 +1134,7 @@ async fn handle_http_request(
             return Err(Box::new(e));
         }
     }
-    
+
     Ok(())
 }
 
@@ -1133,12 +1155,14 @@ async fn handle_miner_connection(
 
     loop {
         line.clear();
-        
+
         // Read line with timeout to prevent hanging
         match tokio::time::timeout(
             std::time::Duration::from_secs(300),
-            reader.read_line(&mut line)
-        ).await {
+            reader.read_line(&mut line),
+        )
+        .await
+        {
             Ok(Ok(0)) => {
                 // Connection closed gracefully
                 if let Some(id) = miner_id {
@@ -1149,7 +1173,7 @@ async fn handle_miner_connection(
             Ok(Ok(_)) => {
                 // Line read successfully
                 let trimmed = line.trim();
-                
+
                 // Skip empty lines
                 if trimmed.is_empty() {
                     continue;
@@ -1168,9 +1192,9 @@ async fn handle_miner_connection(
                                     "result": Value::Null,
                                     "error": "Invalid method"
                                 });
-                                let _ = writer.write_all(
-                                    format!("{}\n", error_response).as_bytes()
-                                ).await;
+                                let _ = writer
+                                    .write_all(format!("{}\n", error_response).as_bytes())
+                                    .await;
                                 continue;
                             }
                         };
@@ -1191,7 +1215,10 @@ async fn handle_miner_connection(
                                 let address = match params.first() {
                                     Some(Value::String(addr)) => addr.clone(),
                                     _ => {
-                                        warn!("Invalid address in mining.subscribe from {}", peer_addr);
+                                        warn!(
+                                            "Invalid address in mining.subscribe from {}",
+                                            peer_addr
+                                        );
                                         "unknown".to_string()
                                     }
                                 };
@@ -1203,7 +1230,10 @@ async fn handle_miner_connection(
                                         _miner_address = Some(address.clone());
                                         is_authorized = false;
 
-                                        info!("Miner subscribed: {} from {}", registered_id, peer_addr);
+                                        info!(
+                                            "Miner subscribed: {} from {}",
+                                            registered_id, peer_addr
+                                        );
 
                                         json!({
                                             "id": request_id,
@@ -1228,17 +1258,22 @@ async fn handle_miner_connection(
                                 // Authorize miner
                                 if miner_id.is_some() {
                                     is_authorized = true;
-                                    info!("Miner authorized: {} from {}", 
-                                        miner_id.as_ref().unwrap_or(&"unknown".to_string()), 
-                                        peer_addr);
-                                    
+                                    info!(
+                                        "Miner authorized: {} from {}",
+                                        miner_id.as_ref().unwrap_or(&"unknown".to_string()),
+                                        peer_addr
+                                    );
+
                                     json!({
                                         "id": request_id,
                                         "result": true,
                                         "error": Value::Null
                                     })
                                 } else {
-                                    warn!("Authorization attempt without subscription from {}", peer_addr);
+                                    warn!(
+                                        "Authorization attempt without subscription from {}",
+                                        peer_addr
+                                    );
                                     json!({
                                         "id": request_id,
                                         "result": false,
@@ -1249,7 +1284,10 @@ async fn handle_miner_connection(
                             "mining.submit" => {
                                 // Submit share - requires authorization
                                 if !is_authorized || miner_id.is_none() {
-                                    warn!("Share submission without authorization from {}", peer_addr);
+                                    warn!(
+                                        "Share submission without authorization from {}",
+                                        peer_addr
+                                    );
                                     json!({
                                         "id": request_id,
                                         "result": false,
@@ -1282,18 +1320,19 @@ async fn handle_miner_connection(
                                     };
 
                                     // REAL VALIDATION: Reject shares for stale block heights
-                                    if share_block_height > 0 && share_block_height < current_height {
+                                    if share_block_height > 0 && share_block_height < current_height
+                                    {
                                         let error_msg = format!("Stale share: block height mismatch (expected {}, got {})", 
                                             current_height, share_block_height);
                                         warn!("Stale share from {}: share_height={}, current_height={}", 
                                             peer_addr, share_block_height, current_height);
-                                        
+
                                         let response_obj = json!({
                                             "id": request_id,
                                             "result": false,
                                             "error": error_msg
                                         });
-                                        
+
                                         response_obj
                                     } else {
                                         let nonce_str = match params.get(2) {
@@ -1304,7 +1343,10 @@ async fn handle_miner_connection(
                                         let hash = match params.get(3) {
                                             Some(Value::String(h)) => h.clone(),
                                             _ => {
-                                                warn!("Invalid hash in share submission from {}", peer_addr);
+                                                warn!(
+                                                    "Invalid hash in share submission from {}",
+                                                    peer_addr
+                                                );
                                                 String::new()
                                             }
                                         };
@@ -1316,35 +1358,54 @@ async fn handle_miner_connection(
                                         };
 
                                         // Debug: log hash length and block flag
-                                        debug!("Received hash from {}: len={}, is_block={}, hash={}", 
-                                            peer_addr, hash.len(), is_block, hash);
+                                        debug!(
+                                            "Received hash from {}: len={}, is_block={}, hash={}",
+                                            peer_addr,
+                                            hash.len(),
+                                            is_block,
+                                            hash
+                                        );
 
                                         // Parse nonce from hex string
                                         let nonce = match u64::from_str_radix(&nonce_str, 16) {
                                             Ok(n) => n,
                                             Err(_) => {
-                                                warn!("Invalid nonce format from {}: {}", peer_addr, nonce_str);
+                                                warn!(
+                                                    "Invalid nonce format from {}: {}",
+                                                    peer_addr, nonce_str
+                                                );
                                                 0
                                             }
                                         };
 
                                         // REAL IMPLEMENTATION: If is_block, submit to blockchain immediately
                                         if is_block {
-                                            info!("🎉 BLOCK SUBMISSION from {}: nonce={}, hash={}", 
-                                                peer_addr, nonce_str, hash);
-                                            
+                                            info!(
+                                                "🎉 BLOCK SUBMISSION from {}: nonce={}, hash={}",
+                                                peer_addr, nonce_str, hash
+                                            );
+
                                             // Submit block to node
-                                            match pool.submit_block_to_node(&hash, _miner_address.clone().unwrap_or_default()).await {
+                                            match pool
+                                                .submit_block_to_node(
+                                                    &hash,
+                                                    _miner_address.clone().unwrap_or_default(),
+                                                )
+                                                .await
+                                            {
                                                 Ok(_) => {
                                                     info!("✅ Block successfully submitted to blockchain");
-                                                    
+
                                                     // CRITICAL: Spawn background task to sync block height
                                                     // This prevents blocking the connection handler
                                                     // and avoids "Broken pipe" errors from timeout
                                                     let pool_clone = pool.clone();
                                                     tokio::spawn(async move {
                                                         info!("Background: Syncing block height after successful block submission...");
-                                                        match pool_clone.sync_block_height_from_node().await {
+                                                        match pool_clone
+                                                            .sync_block_height_from_node()
+                                                            .await
+                                                        {
                                                             Ok(new_height) => {
                                                                 info!("✓ Background: Block height synced to: {}", new_height);
                                                             }
@@ -1389,7 +1450,10 @@ async fn handle_miner_connection(
                                                 }
                                             }
                                             Err(e) => {
-                                                error!("Share submission error from {}: {}", peer_addr, e);
+                                                error!(
+                                                    "Share submission error from {}: {}",
+                                                    peer_addr, e
+                                                );
                                                 // Stratum protocol: return error with message
                                                 json!({
                                                     "id": request_id,
@@ -1451,18 +1515,25 @@ async fn handle_miner_connection(
                     }
                     Err(e) => {
                         // JSON parse error - send error response and continue
-                        warn!("Failed to parse JSON from {}: {} (line: {})", peer_addr, e, trimmed);
-                        
+                        warn!(
+                            "Failed to parse JSON from {}: {} (line: {})",
+                            peer_addr, e, trimmed
+                        );
+
                         let error_response = json!({
                             "id": Value::Null,
                             "result": Value::Null,
                             "error": "Invalid JSON"
                         });
-                        
-                        if let Err(write_err) = writer.write_all(
-                            format!("{}\n", error_response).as_bytes()
-                        ).await {
-                            error!("Failed to send error response to {}: {}", peer_addr, write_err);
+
+                        if let Err(write_err) = writer
+                            .write_all(format!("{}\n", error_response).as_bytes())
+                            .await
+                        {
+                            error!(
+                                "Failed to send error response to {}: {}",
+                                peer_addr, write_err
+                            );
                             break;
                         }
                     }
@@ -1484,7 +1555,6 @@ async fn handle_miner_connection(
     info!("Connection closed: {}", peer_addr);
     Ok(())
 }
-
 
 /// Main entry point for Stratum pool binary
 #[tokio::main]
@@ -1521,7 +1591,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         share_timeout: u64,
 
         /// Pool reward address
-        #[arg(long, default_value = "SLVR2WZa4S4nmMu2iYrrssvWJ5jUTD5WiTWRBj4TBo6G6kreanv2LTKQM1fdhZzEGHJitkoAytN1PjVBUzHXkre4Hgae")]
+        #[arg(
+            long,
+            default_value = "SLVR2WZa4S4nmMu2iYrrssvWJ5jUTD5WiTWRBj4TBo6G6kreanv2LTKQM1fdhZzEGHJitkoAytN1PjVBUzHXkre4Hgae"
+        )]
         pool_address: String,
 
         /// Log level
@@ -1533,11 +1606,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize logging
     tracing_subscriber::fmt()
-        .with_max_level(
-            args.log_level
-                .parse()
-                .unwrap_or(tracing::Level::INFO),
-        )
+        .with_max_level(args.log_level.parse().unwrap_or(tracing::Level::INFO))
         .init();
 
     info!("═══════════════════════════════════════════════════════════");
@@ -1579,10 +1648,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct U512 {
-    part0: u128,  // Bytes 0-15
-    part1: u128,  // Bytes 16-31
-    part2: u128,  // Bytes 32-47
-    part3: u128,  // Bytes 48-63
+    part0: u128, // Bytes 0-15
+    part1: u128, // Bytes 16-31
+    part2: u128, // Bytes 32-47
+    part3: u128, // Bytes 48-63
 }
 
 impl U512 {
@@ -1593,20 +1662,25 @@ impl U512 {
         let mut p1_bytes = [0u8; 16];
         let mut p2_bytes = [0u8; 16];
         let mut p3_bytes = [0u8; 16];
-        
+
         p0_bytes.copy_from_slice(&bytes[0..16]);
         p1_bytes.copy_from_slice(&bytes[16..32]);
         p2_bytes.copy_from_slice(&bytes[32..48]);
         p3_bytes.copy_from_slice(&bytes[48..64]);
-        
+
         let part0 = u128::from_be_bytes(p0_bytes);
         let part1 = u128::from_be_bytes(p1_bytes);
         let part2 = u128::from_be_bytes(p2_bytes);
         let part3 = u128::from_be_bytes(p3_bytes);
-        
-        U512 { part0, part1, part2, part3 }
+
+        U512 {
+            part0,
+            part1,
+            part2,
+            part3,
+        }
     }
-    
+
     /// Divide U512 by u128 using proper long division
     /// Returns U512 = self / divisor
     #[allow(dead_code)]
@@ -1619,7 +1693,7 @@ impl U512 {
                 part3: u128::MAX,
             };
         }
-        
+
         // Perform long division on 512-bit number
         let mut result = U512 {
             part0: 0,
@@ -1627,21 +1701,21 @@ impl U512 {
             part2: 0,
             part3: 0,
         };
-        
+
         let mut remainder: u128 = 0;
-        
+
         // Process each 128-bit part from most significant to least significant
         for part in [&self.part0, &self.part1, &self.part2, &self.part3].iter() {
             let combined = (remainder << 64) | (*part >> 64);
             let q_high = combined / divisor;
             remainder = combined % divisor;
-            
+
             let combined_low = (remainder << 64) | (*part & 0xFFFFFFFFFFFFFFFF);
             let q_low = combined_low / divisor;
             remainder = combined_low % divisor;
-            
+
             let quotient = (q_high << 64) | q_low;
-            
+
             match result.part0 {
                 0 if result.part1 == 0 && result.part2 == 0 => {
                     result.part0 = quotient;
@@ -1657,10 +1731,10 @@ impl U512 {
                 }
             }
         }
-        
+
         result
     }
-    
+
     /// Maximum U512 value
     #[allow(dead_code)]
     fn max() -> Self {
@@ -1684,5 +1758,3 @@ fn u512_from_bytes(bytes: &[u8; 64]) -> U512 {
 fn u512_max() -> U512 {
     U512::max()
 }
-
-

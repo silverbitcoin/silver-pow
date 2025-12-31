@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug};
+use tracing::debug;
 
 /// Block header structure (80 bytes)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +58,10 @@ impl BlockHeader {
     /// Deserialize header from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != 80 {
-            return Err(format!("Invalid header size: expected 80, got {}", bytes.len()));
+            return Err(format!(
+                "Invalid header size: expected 80, got {}",
+                bytes.len()
+            ));
         }
 
         let version = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
@@ -216,12 +219,10 @@ impl Block {
 
         // REAL IMPLEMENTATION: Parse coinbase transaction properly
         let height = u64::from_le_bytes([
-            bytes[80], bytes[81], bytes[82], bytes[83], bytes[84], bytes[85], bytes[86],
-            bytes[87],
+            bytes[80], bytes[81], bytes[82], bytes[83], bytes[84], bytes[85], bytes[86], bytes[87],
         ]);
         let timestamp = u64::from_le_bytes([
-            bytes[88], bytes[89], bytes[90], bytes[91], bytes[92], bytes[93], bytes[94],
-            bytes[95],
+            bytes[88], bytes[89], bytes[90], bytes[91], bytes[92], bytes[93], bytes[94], bytes[95],
         ]);
 
         // REAL IMPLEMENTATION: Create proper coinbase transaction
@@ -238,12 +239,12 @@ impl Block {
         // Using MIST_PER_SLVR constant: 50 × 100,000,000 = 5,000,000,000 MIST
         const BLOCK_REWARD_SLVR: u128 = 50; // 50 SLVR per block
         let block_reward = BLOCK_REWARD_SLVR * (silver_core::MIST_PER_SLVR as u128);
-        
+
         // REAL IMPLEMENTATION: Extract transaction fees from block data
         let fees = if bytes.len() > 116 {
             u64::from_le_bytes([
-                bytes[116], bytes[117], bytes[118], bytes[119],
-                bytes[120], bytes[121], bytes[122], bytes[123],
+                bytes[116], bytes[117], bytes[118], bytes[119], bytes[120], bytes[121], bytes[122],
+                bytes[123],
             ]) as u128
         } else {
             0u128
@@ -281,12 +282,7 @@ pub struct BlockBuilder {
 
 impl BlockBuilder {
     /// Create new block builder
-    pub fn new(
-        version: u32,
-        prev_block_hash: [u8; 32],
-        merkle_root: [u8; 32],
-        bits: u32,
-    ) -> Self {
+    pub fn new(version: u32, prev_block_hash: [u8; 32], merkle_root: [u8; 32], bits: u32) -> Self {
         Self {
             version,
             prev_block_hash,
@@ -320,12 +316,8 @@ impl BlockBuilder {
             nonce,
         );
 
-        let coinbase = CoinbaseTransaction::new(
-            block_height,
-            miner_address,
-            reward_amount,
-            transaction_fees,
-        );
+        let coinbase =
+            CoinbaseTransaction::new(block_height, miner_address, reward_amount, transaction_fees);
 
         let block = Block::new(header, coinbase, block_height, now);
 
@@ -365,7 +357,8 @@ mod tests {
     fn test_coinbase_transaction() {
         // REAL TEST: Using MIST_PER_SLVR constant (50 SLVR = 5,000,000,000 MIST)
         let block_reward = 50u64 * silver_core::MIST_PER_SLVR;
-        let coinbase = CoinbaseTransaction::new(1, "miner_address".to_string(), block_reward as u128, 100000);
+        let coinbase =
+            CoinbaseTransaction::new(1, "miner_address".to_string(), block_reward as u128, 100000);
         let bytes = coinbase.to_bytes();
         assert!(!bytes.is_empty());
     }

@@ -1,8 +1,8 @@
 //! Production-grade PoW consensus engine integration
 
 use crate::{
-    BlockValidator, DifficultyCalculator, Miner, MinerConfig, MiningPool, PoolConfig, PoWConfig,
-    PoWError, Result, WorkPackage, WorkProof,
+    BlockValidator, DifficultyCalculator, Miner, MinerConfig, MiningPool, PoWConfig, PoWError,
+    PoolConfig, Result, WorkPackage, WorkProof,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -92,7 +92,9 @@ impl PoWConsensus {
 
         let mut states = self.chain_states.write().await;
         if states.contains_key(&chain_id) {
-            return Err(PoWError::InvalidBlock("Chain already initialized".to_string()));
+            return Err(PoWError::InvalidBlock(
+                "Chain already initialized".to_string(),
+            ));
         }
 
         states.insert(chain_id, ChainState::new(chain_id));
@@ -144,7 +146,9 @@ impl PoWConsensus {
 
         debug!(
             "Created work package for chain {} height {} difficulty {}",
-            chain_id, state.current_height + 1, state.current_difficulty
+            chain_id,
+            state.current_height + 1,
+            state.current_difficulty
         );
 
         Ok(work)
@@ -159,13 +163,11 @@ impl PoWConsensus {
 
         // Validate block height
         if proof.block_height != state.current_height + 1 {
-            return Err(PoWError::InvalidBlock(
-                format!(
-                    "Invalid block height: expected {}, got {}",
-                    state.current_height + 1,
-                    proof.block_height
-                ),
-            ));
+            return Err(PoWError::InvalidBlock(format!(
+                "Invalid block height: expected {}, got {}",
+                state.current_height + 1,
+                proof.block_height
+            )));
         }
 
         // Validate proof of work
@@ -189,17 +191,19 @@ impl PoWConsensus {
         // Check if difficulty adjustment is needed
         let period_elapsed = now - state.period_start_time;
         if state.blocks_in_period >= self.config.difficulty_adjustment_interval {
-            let new_difficulty = self
-                .difficulty_calculator
-                .adjust_difficulty_kadena_style(
-                    state.current_difficulty,
-                    state.blocks_in_period,
-                    period_elapsed * 1000,
-                )?;
+            let new_difficulty = self.difficulty_calculator.adjust_difficulty_kadena_style(
+                state.current_difficulty,
+                state.blocks_in_period,
+                period_elapsed * 1000,
+            )?;
 
             info!(
                 "Difficulty adjustment for chain {}: {} -> {} (period: {} blocks, {} ms)",
-                proof.chain_id, state.current_difficulty, new_difficulty, state.blocks_in_period, period_elapsed * 1000
+                proof.chain_id,
+                state.current_difficulty,
+                new_difficulty,
+                state.blocks_in_period,
+                period_elapsed * 1000
             );
 
             state.current_difficulty = new_difficulty;

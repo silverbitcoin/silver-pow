@@ -224,23 +224,21 @@ impl BlockSubmissionHandler {
         )
         .await
         {
-            Ok(Ok(response)) => {
-                match response.json::<Value>().await {
-                    Ok(result) => {
-                        if result["error"].is_null() {
-                            debug!("Node accepted block");
-                            Ok(true)
-                        } else {
-                            let error_msg = result["error"]["message"]
-                                .as_str()
-                                .unwrap_or("Unknown error");
-                            warn!("Node rejected block: {}", error_msg);
-                            Ok(false)
-                        }
+            Ok(Ok(response)) => match response.json::<Value>().await {
+                Ok(result) => {
+                    if result["error"].is_null() {
+                        debug!("Node accepted block");
+                        Ok(true)
+                    } else {
+                        let error_msg = result["error"]["message"]
+                            .as_str()
+                            .unwrap_or("Unknown error");
+                        warn!("Node rejected block: {}", error_msg);
+                        Ok(false)
                     }
-                    Err(e) => Err(format!("Failed to parse node response: {}", e)),
                 }
-            }
+                Err(e) => Err(format!("Failed to parse node response: {}", e)),
+            },
             Ok(Err(e)) => Err(format!("RPC request failed: {}", e)),
             Err(_) => Err("RPC request timeout".to_string()),
         }

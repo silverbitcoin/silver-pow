@@ -12,10 +12,10 @@ use tracing::{error, info, warn};
 /// Represents a 512-bit unsigned integer as four u128 values (for proper 512-bit arithmetic)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct U512 {
-    part0: u128,  // Bytes 0-15
-    part1: u128,  // Bytes 16-31
-    part2: u128,  // Bytes 32-47
-    part3: u128,  // Bytes 48-63
+    part0: u128, // Bytes 0-15
+    part1: u128, // Bytes 16-31
+    part2: u128, // Bytes 32-47
+    part3: u128, // Bytes 48-63
 }
 
 impl std::fmt::Display for U512 {
@@ -35,20 +35,25 @@ impl U512 {
         let mut p1_bytes = [0u8; 16];
         let mut p2_bytes = [0u8; 16];
         let mut p3_bytes = [0u8; 16];
-        
+
         p0_bytes.copy_from_slice(&bytes[0..16]);
         p1_bytes.copy_from_slice(&bytes[16..32]);
         p2_bytes.copy_from_slice(&bytes[32..48]);
         p3_bytes.copy_from_slice(&bytes[48..64]);
-        
+
         let part0 = u128::from_be_bytes(p0_bytes);
         let part1 = u128::from_be_bytes(p1_bytes);
         let part2 = u128::from_be_bytes(p2_bytes);
         let part3 = u128::from_be_bytes(p3_bytes);
-        
-        U512 { part0, part1, part2, part3 }
+
+        U512 {
+            part0,
+            part1,
+            part2,
+            part3,
+        }
     }
-    
+
     /// Divide U512 by u128 using proper long division
     /// Returns U512 = self / divisor
     fn div_u128(self, divisor: u128) -> U512 {
@@ -60,7 +65,7 @@ impl U512 {
                 part3: u128::MAX,
             };
         }
-        
+
         // Perform long division on 512-bit number
         let mut result = U512 {
             part0: 0,
@@ -68,21 +73,21 @@ impl U512 {
             part2: 0,
             part3: 0,
         };
-        
+
         let mut remainder: u128 = 0;
-        
+
         // Process each 128-bit part from most significant to least significant
         for part in [&self.part0, &self.part1, &self.part2, &self.part3].iter() {
             let combined = (remainder << 64) | (*part >> 64);
             let q_high = combined / divisor;
             remainder = combined % divisor;
-            
+
             let combined_low = (remainder << 64) | (*part & 0xFFFFFFFFFFFFFFFF);
             let q_low = combined_low / divisor;
             remainder = combined_low % divisor;
-            
+
             let quotient = (q_high << 64) | q_low;
-            
+
             match result.part0 {
                 0 if result.part1 == 0 && result.part2 == 0 => {
                     result.part0 = quotient;
@@ -98,10 +103,10 @@ impl U512 {
                 }
             }
         }
-        
+
         result
     }
-    
+
     /// Maximum U512 value
     fn max() -> Self {
         U512 {
@@ -208,7 +213,8 @@ async fn mining_loop(
     info!("Mining thread {} started", thread_id);
 
     // Create Stratum client
-    let stratum_client = silver_pow::StratumPoolClient::new(pool_url.clone(), miner_address.clone());
+    let stratum_client =
+        silver_pow::StratumPoolClient::new(pool_url.clone(), miner_address.clone());
 
     // Connect to pool with retries
     let mut connect_attempts = 0;
@@ -221,7 +227,10 @@ async fn mining_loop(
             Err(e) => {
                 connect_attempts += 1;
                 if connect_attempts >= 5 {
-                    error!("Thread {}: Failed to connect after 5 attempts: {}", thread_id, e);
+                    error!(
+                        "Thread {}: Failed to connect after 5 attempts: {}",
+                        thread_id, e
+                    );
                     return;
                 }
                 warn!(
@@ -273,7 +282,7 @@ async fn mining_loop(
 
         // Real difficulty validation: convert full SHA-512 hash to u512 and compare with target
         let hash_vec = hash.to_vec();
-        
+
         // SHA-512 always produces exactly 64 bytes, so this conversion should always succeed
         let hash_bytes: [u8; 64] = match hash_vec.as_slice().try_into() {
             Ok(bytes) => bytes,
@@ -283,7 +292,7 @@ async fn mining_loop(
                 continue;
             }
         };
-        
+
         let hash_u512 = u512_from_bytes(&hash_bytes);
 
         // Pool difficulty target: 1,000,000,000
@@ -305,7 +314,7 @@ async fn mining_loop(
 
             // Check if it's a block (meets block difficulty) BEFORE submitting
             let is_block = hash_u512 <= block_target;
-            
+
             if is_block {
                 stats.blocks_found.fetch_add(1, Ordering::Relaxed);
                 info!("🎉 BLOCK FOUND! Hash: {}", hash_hex);
@@ -315,10 +324,13 @@ async fn mining_loop(
             // Submit to pool with is_block flag
             // Generate unique job ID from hash and nonce for tracking
             let job_id = format!("{:x}_{}", nonce, &hash_hex[0..16]);
-            match stratum_client.submit_share(&job_id, nonce, &hash_hex, is_block).await {
+            match stratum_client
+                .submit_share(&job_id, nonce, &hash_hex, is_block)
+                .await
+            {
                 Ok(true) => {
                     stats.valid_shares.fetch_add(1, Ordering::Relaxed);
-                    
+
                     if is_block {
                         info!("✅ Block accepted by pool!");
                     }
@@ -347,11 +359,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize logging
     tracing_subscriber::fmt()
-        .with_max_level(
-            args.log_level
-                .parse()
-                .unwrap_or(tracing::Level::INFO),
-        )
+        .with_max_level(args.log_level.parse().unwrap_or(tracing::Level::INFO))
         .init();
 
     info!("═══════════════════════════════════════════════════════════");

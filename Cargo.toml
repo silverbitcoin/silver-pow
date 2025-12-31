@@ -15,6 +15,7 @@ description = "Proof-of-Work consensus engine for SilverBitcoin 512-bit blockcha
 silver-core = { path = "../silver-core" }
 silver-crypto = { path = "../silver-crypto" }
 silver-storage = { path = "../silver-storage" }
+silver-logging = { path = "../silver-logging" }
 
 tokio = { version = "1.48", features = ["full", "tracing"] }
 tokio-util = { version = "0.7", features = ["full"] }
@@ -48,6 +49,10 @@ reqwest = { version = "0.12", features = ["json"] }
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-full"] }
+
+# Mining utilities
+rand = "0.8"
+num_cpus = "1.16"
 hyper = "1.4"
 
 # WebSocket support

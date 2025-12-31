@@ -7,38 +7,48 @@
 //! - Mining pools supported via Stratum protocol
 //! - Quantum-resistant signatures for transactions
 
-pub mod difficulty;
-pub mod miner;
-pub mod mining_pool;
-pub mod rewards;
-pub mod work;
-pub mod stratum;
-pub mod stratum_pool;
-pub mod stratum_client;
-pub mod block_validator;
-pub mod consensus;
 pub mod block_builder;
 pub mod block_submission;
-pub mod reward_distribution;
+pub mod block_validator;
+pub mod consensus;
+pub mod difficulty;
 pub mod difficulty_adjustment;
+pub mod miner;
+pub mod mining_pool;
+pub mod reward_distribution;
+pub mod rewards;
+pub mod stratum;
+pub mod stratum_client;
+pub mod stratum_pool;
 pub mod transaction_engine;
 pub mod websocket_server;
+pub mod work;
 
-pub use difficulty::{DifficultyAdjustment, DifficultyCalculator, calculate_difficulty_bits, bits_to_difficulty};
-pub use miner::{Miner, MinerConfig, MinerStats};
-pub use mining_pool::{MiningPool, PoolConfig, PoolStats, PoolDetailedStats, MinerShare, MinerAccount};
-pub use rewards::{BlockReward, RewardCalculator};
-pub use work::{WorkPackage, WorkProof};
-pub use stratum::{StratumServer, StratumMessage, StratumClient};
-pub use stratum_client::StratumClient as StratumPoolClient;
-pub use block_validator::{BlockValidator, BlockHeader};
-pub use consensus::{PoWConsensus, ChainState, BlockRecord, ConsensusStats};
 pub use block_builder::{Block, BlockBuilder, BlockHeader as BH, CoinbaseTransaction};
 pub use block_submission::{BlockSubmissionHandler, BlockSubmissionResult, SubmissionStatus};
-pub use reward_distribution::{RewardDistributionManager, MinerRewardAccount, BlockRewardRecord, RewardStats};
-pub use difficulty_adjustment::{DifficultyAdjustmentManager, DifficultyAdjustmentRecord, DifficultyStats};
-pub use transaction_engine::{TransactionEngine, Transaction, TransactionStatus, TransactionEngineStats};
-pub use websocket_server::{WebSocketServer, BlockchainEvent, SubscriptionType};
+pub use block_validator::{BlockHeader, BlockValidator};
+pub use consensus::{BlockRecord, ChainState, ConsensusStats, PoWConsensus};
+pub use difficulty::{
+    bits_to_difficulty, calculate_difficulty_bits, DifficultyAdjustment, DifficultyCalculator,
+};
+pub use difficulty_adjustment::{
+    DifficultyAdjustmentManager, DifficultyAdjustmentRecord, DifficultyStats,
+};
+pub use miner::{Miner, MinerConfig, MinerStats};
+pub use mining_pool::{
+    MinerAccount, MinerShare, MiningPool, PoolConfig, PoolDetailedStats, PoolStats,
+};
+pub use reward_distribution::{
+    BlockRewardRecord, MinerRewardAccount, RewardDistributionManager, RewardStats,
+};
+pub use rewards::{BlockReward, RewardCalculator};
+pub use stratum::{StratumClient, StratumMessage, StratumServer};
+pub use stratum_client::StratumClient as StratumPoolClient;
+pub use transaction_engine::{
+    Transaction, TransactionEngine, TransactionEngineStats, TransactionStatus,
+};
+pub use websocket_server::{BlockchainEvent, SubscriptionType, WebSocketServer};
+pub use work::{WorkPackage, WorkProof};
 
 use thiserror::Error;
 
@@ -101,13 +111,13 @@ pub struct PoWConfig {
 impl Default for PoWConfig {
     fn default() -> Self {
         Self {
-            target_block_time_ms: 30_000, // 30 seconds per chain
+            target_block_time_ms: 30_000,         // 30 seconds per chain
             difficulty_adjustment_interval: 2016, // ~2 weeks at 30s blocks
             initial_difficulty: 1_000_000,
             min_difficulty: 1_000,
             max_difficulty: u64::MAX,
             base_block_reward: 50_000_000_000, // 500 SILVER in satoshis
-            halving_interval: 210_000, // Similar to Bitcoin
+            halving_interval: 210_000,         // Similar to Bitcoin
             mining_algorithm: "SHA-512",
         }
     }

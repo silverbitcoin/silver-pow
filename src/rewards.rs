@@ -13,11 +13,7 @@ pub struct BlockReward {
 }
 
 impl BlockReward {
-    pub fn new(
-        block_height: u64,
-        base_reward: u128,
-        transaction_fees: u128,
-    ) -> Result<Self> {
+    pub fn new(block_height: u64, base_reward: u128, transaction_fees: u128) -> Result<Self> {
         let total_miner_reward = base_reward + transaction_fees;
 
         Ok(Self {
@@ -64,11 +60,7 @@ impl RewardCalculator {
     ) -> Result<BlockReward> {
         let base_reward = self.calculate_base_reward(block_height);
 
-        BlockReward::new(
-            block_height,
-            base_reward,
-            transaction_fees,
-        )
+        BlockReward::new(block_height, base_reward, transaction_fees)
     }
 
     /// Calculate miner reward (100% of block reward + 100% of fees)
@@ -96,8 +88,6 @@ impl RewardCalculator {
         self.get_next_halving_height(current_height) - current_height
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
